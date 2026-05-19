@@ -82,4 +82,5 @@ preflight-script.ts
 RELEASE-GUIDE.md
 TODOS.md
 AGENTS.md
+.todos/
 .tokensave
