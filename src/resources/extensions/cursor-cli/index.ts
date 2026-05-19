@@ -33,10 +33,11 @@ import type { ExtensionAPI } from "@gsd/pi-coding-agent";
 import { FORCE_FLAG_NAME, resolveAllowsWrites } from "./allows-writes.js";
 import { getCursorModels } from "./models.js";
 import { isCursorReady } from "./readiness.js";
-import {
-	streamViaCursorCli,
-	type CursorStreamOptions,
-} from "./stream-adapter.js";
+import type { CursorStreamOptions } from "./stream-adapter.js";
+// UPSTREAM_REVIEW:C — `streamViaCursor` dispatches between the CLI pump and
+// the SDK pump per the persisted `cursor.adapter` setting. The metrics
+// recording hook lives in the dispatcher so it fires exactly once per slice.
+import { streamViaCursor } from "./stream-dispatch.js";
 import { registerCursorCommands } from "./auth-cli-helper.js";
 
 export default function cursorCli(pi: ExtensionAPI): void {
@@ -83,6 +84,7 @@ function makeStreamSimple(
 			...(options as CursorStreamOptions | undefined),
 			allowsWrites: resolution.allowsWrites,
 		};
-		return streamViaCursorCli(model, context, merged);
+		// UPSTREAM_REVIEW:C
+		return streamViaCursor(model, context, merged);
 	};
 }

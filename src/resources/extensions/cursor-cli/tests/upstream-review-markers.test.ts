@@ -27,6 +27,7 @@ import { join, relative, sep } from "node:path";
 // "literal" forms used by the audit.
 const MARKER_A = `UPSTREAM_${"REVIEW"}:A`;
 const MARKER_B = `UPSTREAM_${"REVIEW"}:B`;
+const MARKER_C = `UPSTREAM_${"REVIEW"}:C`;
 
 /** Repo-relative file paths expected to contain at least one :A marker.
  *
@@ -44,11 +45,18 @@ const EXPECTED_FILES_A: ReadonlyArray<string> = [
 /** Minimum total :A marker count across the repo. Drift below this fails. */
 const EXPECTED_MIN_TOTAL_A = 9;
 
-/** Repo-relative file paths expected to contain at least one :B marker. */
+/** Repo-relative file paths expected to contain at least one :B marker.
+ *
+ * NOTE (plan #06 refactor): the metrics recording hook moved from
+ * `stream-adapter.ts` into the new `stream-dispatch.ts` (the public
+ * `streamSimple` entry point that owns the single stream.result() boundary
+ * so we don't double-record across CLI/SDK paths). The marker list follows
+ * the code.
+ */
 const EXPECTED_FILES_B: ReadonlyArray<string> = [
 	"src/resources/extensions/cursor-cli/metrics.ts",
 	"src/resources/extensions/cursor-cli/doctor.ts",
-	"src/resources/extensions/cursor-cli/stream-adapter.ts",
+	"src/resources/extensions/cursor-cli/stream-dispatch.ts",
 	"src/resources/extensions/cursor-cli/auth-cli-helper.ts",
 	"src/resources/extensions/cursor-cli/tests/metrics.test.ts",
 	"src/resources/extensions/cursor-cli/tests/doctor-render.test.ts",
@@ -59,6 +67,28 @@ const EXPECTED_FILES_B: ReadonlyArray<string> = [
 
 /** Minimum total :B marker count across the repo. Drift below this fails. */
 const EXPECTED_MIN_TOTAL_B = 30;
+
+/** Repo-relative file paths expected to contain at least one :C marker
+ * (plan #06 — SDK adapter, path selector, persistent adapter setting,
+ * dispatcher, shared event translation).
+ */
+const EXPECTED_FILES_C: ReadonlyArray<string> = [
+	"src/resources/extensions/cursor-cli/sdk-runtime.ts",
+	"src/resources/extensions/cursor-cli/sdk-adapter.ts",
+	"src/resources/extensions/cursor-cli/sdk-types.ts",
+	"src/resources/extensions/cursor-cli/path-selector.ts",
+	"src/resources/extensions/cursor-cli/adapter-setting.ts",
+	"src/resources/extensions/cursor-cli/stream-dispatch.ts",
+	"src/resources/extensions/cursor-cli/stream-translation.ts",
+	"src/resources/extensions/cursor-cli/stream-adapter.ts",
+	"src/resources/extensions/cursor-cli/index.ts",
+	"src/resources/extensions/cursor-cli/auth-cli-helper.ts",
+	"src/resources/extensions/cursor-cli/tests/upstream-review-markers.test.ts",
+	"src/resources/extensions/cursor-cli/tests/integration/stream-end-to-end.test.ts",
+];
+
+/** Minimum total :C marker count across the repo. Drift below this fails. */
+const EXPECTED_MIN_TOTAL_C = 60;
 
 /** Roots scanned for markers. */
 const SCAN_ROOTS: ReadonlyArray<string> = [
@@ -115,9 +145,10 @@ function countMarkers(file: string, marker: string): number {
 
 // UPSTREAM_REVIEW:A — self-reference so the :A audit always finds this file.
 // UPSTREAM_REVIEW:B — self-reference so the :B audit always finds this file.
+// UPSTREAM_REVIEW:C — self-reference so the :C audit always finds this file.
 
 interface MarkerConfig {
-	letter: "A" | "B";
+	letter: "A" | "B" | "C";
 	marker: string;
 	expectedFiles: ReadonlyArray<string>;
 	expectedMinTotal: number;
@@ -126,6 +157,7 @@ interface MarkerConfig {
 const CONFIGS: ReadonlyArray<MarkerConfig> = [
 	{ letter: "A", marker: MARKER_A, expectedFiles: EXPECTED_FILES_A, expectedMinTotal: EXPECTED_MIN_TOTAL_A },
 	{ letter: "B", marker: MARKER_B, expectedFiles: EXPECTED_FILES_B, expectedMinTotal: EXPECTED_MIN_TOTAL_B },
+	{ letter: "C", marker: MARKER_C, expectedFiles: EXPECTED_FILES_C, expectedMinTotal: EXPECTED_MIN_TOTAL_C },
 ];
 
 for (const cfg of CONFIGS) {

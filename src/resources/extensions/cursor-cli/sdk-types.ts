@@ -228,3 +228,159 @@ export type CursorStreamEvent =
 	| CursorUserEvent
 	| CursorErrorEvent
 	| CursorUnknownEvent;
+
+// ─── @cursor/sdk local type mirrors ──────────────────────────────────────
+
+// UPSTREAM_REVIEW:C — local structural mirrors of the @cursor/sdk public
+// types. Hard-importing `@cursor/sdk` at typecheck time would force the
+// package to be installed in `node_modules` (it isn't, by design — see
+// path-selector.ts for the dynamic-import pattern). Verified against
+// @cursor/sdk@1.0.13 (verified 2026-05-19 — see sdk-runtime.ts header for
+// the live API shape).
+
+/** Structural mirror of `@cursor/sdk#TextBlock`. */
+export interface SdkTextBlock {
+	type: "text";
+	text: string;
+}
+
+/** Structural mirror of `@cursor/sdk#ToolUseBlock`. */
+export interface SdkToolUseBlock {
+	type: "tool_use";
+	id: string;
+	name: string;
+	input: unknown;
+}
+
+/** Structural mirror of `@cursor/sdk#SDKSystemMessage`. */
+export interface SdkSystemMessage {
+	type: "system";
+	subtype?: "init";
+	agent_id: string;
+	run_id: string;
+	model?: { id: string };
+	tools?: string[];
+}
+
+/** Structural mirror of `@cursor/sdk#SDKAssistantMessage`. */
+export interface SdkAssistantMessage {
+	type: "assistant";
+	agent_id: string;
+	run_id: string;
+	message: {
+		role: "assistant";
+		content: Array<SdkTextBlock | SdkToolUseBlock>;
+	};
+}
+
+/** Structural mirror of `@cursor/sdk#SDKUserMessageEvent`. */
+export interface SdkUserMessage {
+	type: "user";
+	agent_id: string;
+	run_id: string;
+	message: {
+		role: "user";
+		content: SdkTextBlock[];
+	};
+}
+
+/** Structural mirror of `@cursor/sdk#SDKToolUseMessage`. */
+export interface SdkToolUseMessage {
+	type: "tool_call";
+	agent_id: string;
+	run_id: string;
+	call_id: string;
+	name: string;
+	status: "running" | "completed" | "error";
+	args?: unknown;
+	result?: unknown;
+	truncated?: { args?: boolean; result?: boolean };
+}
+
+/** Structural mirror of `@cursor/sdk#SDKThinkingMessage`. */
+export interface SdkThinkingMessage {
+	type: "thinking";
+	agent_id: string;
+	run_id: string;
+	text: string;
+	thinking_duration_ms?: number;
+}
+
+/** Structural mirror of `@cursor/sdk#SDKStatusMessage`. */
+export interface SdkStatusMessage {
+	type: "status";
+	agent_id: string;
+	run_id: string;
+	status: "CREATING" | "RUNNING" | "FINISHED" | "ERROR" | "CANCELLED" | "EXPIRED";
+	message?: string;
+}
+
+/** Structural mirror of `@cursor/sdk#SDKTaskMessage` (consumed silently). */
+export interface SdkTaskMessage {
+	type: "task";
+	agent_id: string;
+	run_id: string;
+	status?: string;
+	text?: string;
+}
+
+/** Catch-all for SDK message shapes the adapter does not yet recognise. */
+export interface SdkUnknownMessage {
+	type: string;
+	[key: string]: unknown;
+}
+
+export type SdkMessage =
+	| SdkSystemMessage
+	| SdkAssistantMessage
+	| SdkUserMessage
+	| SdkToolUseMessage
+	| SdkThinkingMessage
+	| SdkStatusMessage
+	| SdkTaskMessage
+	| SdkUnknownMessage;
+
+/** Structural mirror of the `RunResult` shape from `@cursor/sdk#Run.wait()`. */
+export interface SdkRunResult {
+	id: string;
+	status: "finished" | "error" | "cancelled";
+	result?: string;
+	model?: { id: string };
+	durationMs?: number;
+}
+
+/** Minimal mirror of `@cursor/sdk#Run` — only the surface the adapter uses. */
+export interface SdkRun {
+	readonly id: string;
+	readonly agentId: string;
+	stream(): AsyncGenerator<SdkMessage, void>;
+	wait(): Promise<SdkRunResult>;
+	cancel(): Promise<void>;
+}
+
+/** Minimal mirror of `@cursor/sdk#SDKAgent`. */
+export interface SdkAgent {
+	readonly agentId: string;
+	send(message: string | { text: string }, options?: unknown): Promise<SdkRun>;
+	close(): void;
+}
+
+/** Minimal mirror of `@cursor/sdk#AgentOptions`. */
+export interface SdkAgentCreateOptions {
+	model?: { id: string };
+	apiKey?: string;
+	local?: { cwd?: string | string[]; settingSources?: string[] };
+	mcpServers?: Record<string, unknown>;
+	idempotencyKey?: string;
+}
+
+/** Minimal mirror of the `Agent` namespace from the SDK. */
+export interface SdkAgentNamespace {
+	create(options: SdkAgentCreateOptions): Promise<SdkAgent>;
+}
+
+/** The exported shape of `@cursor/sdk` that the path selector hands the adapter. */
+export interface SdkModule {
+	Agent: SdkAgentNamespace;
+	[key: string]: unknown;
+}

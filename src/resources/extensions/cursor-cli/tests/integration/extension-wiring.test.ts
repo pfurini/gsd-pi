@@ -30,6 +30,12 @@ import { FORCE_ENV_VAR, FORCE_FLAG_NAME } from "../../allows-writes.ts";
 import type { CursorStreamOptions } from "../../stream-adapter.ts";
 import { resetForceWarningLatch } from "../../stream-adapter.ts";
 import { clearReadinessCache } from "../../readiness.ts";
+// UPSTREAM_REVIEW:C — the dispatcher (plan #06) routes to SDK by default
+// when @cursor/sdk resolves on disk. These wiring tests target the CLI
+// argv shape, so force the CLI path via the SDK test hook regardless of
+// whether the SDK is installed in the dev environment.
+import { __setSdkForTests } from "../../sdk-runtime.ts";
+import { __resetPathCacheForTests } from "../../path-selector.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FAKE = join(HERE, "fake-cursor-agent.mjs");
@@ -152,6 +158,11 @@ after(() => {
 beforeEach(() => {
 	clearReadinessCache();
 	resetForceWarningLatch();
+	// UPSTREAM_REVIEW:C — pin the dispatcher to the CLI path for every wiring
+	// case so the argv assertions remain stable regardless of @cursor/sdk
+	// presence on the dev machine.
+	__setSdkForTests(null);
+	__resetPathCacheForTests();
 	delete process.env[FORCE_ENV_VAR];
 	delete process.env.CURSOR_FAKE_EXIT_CODE;
 	delete process.env.CURSOR_FAKE_STDERR;

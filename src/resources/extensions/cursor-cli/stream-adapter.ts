@@ -23,21 +23,15 @@
 import type {
 	Api,
 	AssistantMessage,
-	AssistantMessageEvent,
 	AssistantMessageEventStream,
 	Context,
 	Model,
 	SimpleStreamOptions,
 } from "@gsd/pi-ai";
-import { EventStream } from "@gsd/pi-ai";
 import { spawn, type ChildProcess } from "node:child_process";
 import type { Readable } from "node:stream";
 import { ZERO_USAGE } from "./partial-builder.js";
 import { parseNdjson } from "./ndjson-parser.js";
-// UPSTREAM_REVIEW:B — local-only slice metrics for `/cursor doctor`. The
-// `record()` call is wrapped in try/catch at the resolution hook below so a
-// recorder bug can never escape and break the stream.
-import { record as recordMetric, type MetricEntry } from "./metrics.js";
 import { redactSecrets } from "./redact.js";
 import { findWorkingCommand, getCursorCommandCandidates } from "./readiness.js";
 // UPSTREAM_REVIEW:C — shared translation module covers both CLI and SDK paths.
@@ -46,6 +40,11 @@ import {
 	makeInitialState,
 	mapCursorEvent,
 } from "./stream-translation.js";
+// UPSTREAM_REVIEW:C — local-only metrics recording moved to the dispatcher.
+// streamViaCursorCli is now a thin wrapper kept for tests that exercise the
+// CLI pump in isolation; the public `streamSimple` entry point is
+// `streamViaCursor` in `stream-dispatch.ts`, which owns the metrics hook.
+import { createAssistantStream } from "./stream-dispatch.js";
 
 // Re-export shared types for back-compat with downstream callers and tests
 // that still import them from this module.
@@ -67,19 +66,6 @@ export interface CursorStreamOptions extends SimpleStreamOptions {
 	resumeSessionId?: string;
 	/** Override the sandbox mode. Defaults to leaving Cursor's CLI default. */
 	sandbox?: "enabled" | "disabled";
-}
-
-// ─── Stream factory ──────────────────────────────────────────────────────
-
-function createAssistantStream(): AssistantMessageEventStream {
-	return new EventStream<AssistantMessageEvent, AssistantMessage>(
-		(event) => event.type === "done" || event.type === "error",
-		(event) => {
-			if (event.type === "done") return event.message;
-			if (event.type === "error") return event.error;
-			throw new Error("Unexpected event type for final result");
-		},
-	) as AssistantMessageEventStream;
 }
 
 // ─── Prompt construction ─────────────────────────────────────────────────
@@ -260,80 +246,15 @@ export function streamViaCursorCli(
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream {
 	const stream = createAssistantStream();
-	// UPSTREAM_REVIEW:B — `startedAt` is captured here (before the spawn inside
-	// `pumpCursorMessages`) so the recorded latency reflects the user-visible
-	// wall clock, including any readiness-cache probe inside the pump.
-	const startedAt = Date.now();
 	void pumpCursorMessages(model, context, options, stream);
-	// UPSTREAM_REVIEW:B — single recording site per stream. `result()` resolves
-	// with the final `AssistantMessage` for both `done` and `error` push
-	// events, so we get one record per stream regardless of which exit path
-	// the pump took. The try/catch makes recorder failures invisible to the
-	// stream consumer.
-	void stream.result().then(
-		(message) => {
-			try {
-				recordMetric(deriveMetricEntry(message, startedAt, model.id));
-			} catch {
-				// Swallow — see comment above.
-			}
-		},
-		() => {
-			try {
-				recordMetric({
-					startedAt,
-					finishedAt: Date.now(),
-					model: model.id,
-					outcome: "error",
-					inputTokens: 0,
-					outputTokens: 0,
-				});
-			} catch {
-				// Swallow.
-			}
-		},
-	);
 	return stream;
 }
 
-// UPSTREAM_REVIEW:B
-function deriveMetricEntry(
-	message: AssistantMessage,
-	startedAt: number,
-	modelId: string,
-): MetricEntry {
-	const outcome: MetricEntry["outcome"] =
-		message.stopReason === "stop"
-			? "success"
-			: message.stopReason === "aborted"
-				? "aborted"
-				: "error";
-	const entry: MetricEntry = {
-		startedAt,
-		finishedAt: Date.now(),
-		model: modelId,
-		outcome,
-		inputTokens: message.usage?.input ?? 0,
-		outputTokens: message.usage?.output ?? 0,
-	};
-	if (outcome === "error") {
-		const code = extractErrorCode(message.errorMessage);
-		if (code) entry.errorCode = code;
-	}
-	return entry;
-}
-
-// UPSTREAM_REVIEW:B — pull the `<code>:` prefix written by
-// `formatCursorErrorMessage` (see quota-detect.ts). Anything that doesn't
-// match the prefix shape leaves `errorCode` undefined, which the snapshot
-// renders as the literal string `"other"` when surfaced as `lastError`.
-function extractErrorCode(errorMessage: string | undefined): string | undefined {
-	if (!errorMessage) return undefined;
-	const match = /^([a-z][a-z0-9_]*):\s/.exec(errorMessage);
-	return match ? match[1] : undefined;
-}
-
-async function pumpCursorMessages(
+// UPSTREAM_REVIEW:C — exported so `stream-dispatch.ts` can call the pump
+// directly without going through `streamViaCursorCli`'s stream-creation
+// wrapper (the dispatcher creates its own stream so a single
+// `stream.result()` boundary owns the metrics hook).
+export async function pumpCursorMessages(
 	model: Model<Api>,
 	context: Context,
 	options: SimpleStreamOptions | undefined,

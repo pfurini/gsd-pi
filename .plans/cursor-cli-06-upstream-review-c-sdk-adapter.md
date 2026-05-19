@@ -1,6 +1,138 @@
 # Cursor CLI #06 — `UPSTREAM_REVIEW:C` Native `@cursor/sdk` adapter (Phase 2)
 
-## Status: DRAFT — Awaiting implementation
+## Status: SHIPPED — see "Implementation notes (post-landing)" at the end
+
+## Implementation notes (post-landing)
+
+Landed on `feat/cursor-cli-full-power` in two commits:
+
+1. `refactor(cursor-cli): extract stream-translation.ts shared module` (8d1e630fc)
+2. `feat(cursor-cli): @cursor/sdk adapter + path selector + setting` (TBD)
+
+### Files shipped
+
+Created:
+
+- `src/resources/extensions/cursor-cli/stream-translation.ts` — shared event
+  translation pulled out of `stream-adapter.ts`
+- `src/resources/extensions/cursor-cli/sdk-runtime.ts` — dynamic SDK loader
+- `src/resources/extensions/cursor-cli/adapter-setting.ts` — persisted
+  `cursor.adapter` reader / atomic writer
+- `src/resources/extensions/cursor-cli/path-selector.ts` — `pickStreamPath`
+- `src/resources/extensions/cursor-cli/sdk-adapter.ts` — `pumpViaSdk`
+- `src/resources/extensions/cursor-cli/stream-dispatch.ts` — public
+  `streamViaCursor` dispatcher; owns the single metrics-recording boundary
+- `src/resources/extensions/cursor-cli/tests/sdk-runtime.test.ts`
+- `src/resources/extensions/cursor-cli/tests/adapter-setting.test.ts`
+- `src/resources/extensions/cursor-cli/tests/path-selector.test.ts`
+- `src/resources/extensions/cursor-cli/tests/sdk-adapter.test.ts`
+
+Modified:
+
+- `sdk-types.ts` — added local structural mirrors of the @cursor/sdk
+  public types (SdkMessage union, SdkAgent, SdkRun, SdkModule, …) so the
+  adapter typechecks without `import type { ... } from "@cursor/sdk"`
+- `stream-adapter.ts` — slimmed (translation moved out), metrics hook
+  moved out; `streamViaCursorCli` kept as a thin back-compat wrapper
+- `index.ts` — `streamSimple` now wires `streamViaCursor` (dispatcher)
+- `auth-cli-helper.ts` — `/cursor adapter [sdk|cli]` subcommand;
+  `/cursor status` reports the active adapter
+- `tests/upstream-review-markers.test.ts` — added `:C` config (12 files,
+  floor 60 ≤ actual 70); swapped `stream-adapter.ts` → `stream-translation.ts`
+  in `:A`; swapped `stream-adapter.ts` → `stream-dispatch.ts` in `:B`
+- `tests/integration/stream-end-to-end.test.ts` — added an SDK-path E2E
+  test driving the dispatcher with `__setSdkForTests(fakeSdk)`
+- `tests/integration/extension-wiring.test.ts` — pinned the dispatcher
+  to the CLI path via `__setSdkForTests(null)` so the argv assertions
+  remain stable when @cursor/sdk is locally installed
+
+### Test counts (pre-/post-)
+
+- Refactor commit: 143 cursor-cli tests, all green (no behaviour change).
+- Feature commit: 181 cursor-cli tests, all green. Full `npm run verify:pr`:
+  9714 passed, 2 failed (both in the pre-existing
+  `custom-engine-loop-integration.test.js` flake the prompt called out;
+  10/10 in isolation), 9 skipped.
+
+### @cursor/sdk version + signature targeted
+
+- Package: `@cursor/sdk@1.0.13`, verified 2026-05-19 via `npm view`.
+- Resolved shape via `requireFromHere.resolve("@cursor/sdk")` +
+  `await import(SDK_MODULE_NAME)` (variable-held specifier so TS doesn't
+  try to typecheck against the package).
+- `Agent.create({ model: { id }, local: { cwd } })` → `Promise<SDKAgent>`
+- `agent.send(text)` → `Promise<Run>`
+- `run.stream()` → `AsyncGenerator<SDKMessage, void>`
+- `run.wait()` → `Promise<RunResult>` (status / result / durationMs;
+  NO usage field — SDK path reports `ZERO_USAGE` on terminal events,
+  unlike the CLI's `result.usage` block)
+- `run.cancel()` → `Promise<void>` honoured via `options.signal`
+
+### Deviations from the plan
+
+1. **Auth gating.** The plan asked the implementation to confirm
+   "whether the SDK can use a credential file that `cursor-agent login`
+   wrote." It cannot. The SDK requires `process.env.CURSOR_API_KEY`
+   and throws unhandled rejections from its Connect-RPC layer when the
+   key is missing — including from background protocol tasks that the
+   adapter cannot wrap in a try/catch. To avoid that footgun, the path
+   selector now refuses the SDK path when `CURSOR_API_KEY` is unset and
+   falls back to the CLI route with a single redacted stderr warning
+   explaining how to opt in. This is a soft deviation: SDK is still
+   the configured default, but in practice the user needs both
+   `cursor.adapter = "sdk"` (or default) AND `CURSOR_API_KEY` in env
+   for the SDK path to engage. Users with only `cursor-agent login`
+   transparently get the CLI route they had before.
+
+2. **Where the dispatcher lives.** The plan's pseudo-code put
+   `streamViaCursor` next to `streamViaCursorCli` in `stream-adapter.ts`.
+   Landed it in a new `stream-dispatch.ts` instead so the file roles
+   stay clear: `stream-adapter.ts` is the CLI pump,
+   `sdk-adapter.ts` is the SDK pump, and `stream-dispatch.ts` is the
+   single public entry point that picks between them and owns the
+   metrics-recording boundary. Each pump exports a `pumpXxx`
+   function that pushes events into a stream supplied by the
+   dispatcher.
+
+3. **Test hooks instead of an ESM-cache mock.** The plan suggested a
+   `tests/integration/fake-sdk.mjs` mounted via dynamic-import
+   redirection. Replaced with the `__setSdkForTests` / `__clearSdkCacheForTests`
+   pattern from plan #05's metrics module — a structural mock object
+   gets passed to the loader directly via the test hook. No
+   `require.cache` rewriting needed.
+
+4. **`getSettingsPath` import.** The plan suggested resolving via
+   `@gsd/pi-coding-agent`'s `getSettingsPath()`. That helper isn't
+   exported from the package's root barrel. To keep plan #06
+   self-contained inside `cursor-cli/` (no edits to `pi-coding-agent`),
+   `adapter-setting.ts` resolves the path inline via
+   `join(getAgentDir(), "settings.json")` — `getAgentDir` IS exported
+   from the root barrel.
+
+5. **No `fake-sdk.mjs`, no `--via=sdk` capture mode.** Both were marked
+   optional in the plan. Skipped both because the test hook pattern in
+   (3) removes the need for the first, and the SDK fixture capture
+   ladder would only add value if the SDK's wire shape drifts
+   significantly from the CLI's (it doesn't, today — both descend
+   from the same internal type union).
+
+### Follow-up TODO
+
+- **Live SDK-path smoke against a real `@cursor/sdk` install.** The
+  prompt asked for a one-shot smoke driven through the dispatcher with
+  `CURSOR_API_KEY` set. The current dev session did not have the key
+  available in env, so the smoke ran via the CLI route instead (the
+  dispatcher correctly emitted the missing-key warning and fell back).
+  In a future session: export `CURSOR_API_KEY`, run
+  `npm install --no-save @cursor/sdk`, build `dist/`, and drive a
+  small smoke harness through `streamViaCursor` with the default
+  setting. Confirm the SDK path yields `stopReason: "stop"`, that
+  `/cursor doctor` shows one extra entry, and that
+  `usage.input + usage.output === 0` (SDK Run interface doesn't
+  surface tokens). Then flip `cursor.adapter = "cli"` and confirm
+  the CLI path produces the same shape with non-zero usage.
+
+
 
 ## Sequence
 This is **step 6 of 6** in the cursor-cli roadmap and the third

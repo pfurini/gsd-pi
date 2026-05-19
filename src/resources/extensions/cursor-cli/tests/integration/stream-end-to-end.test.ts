@@ -24,6 +24,13 @@ import {
 	type CursorStreamOptions,
 	type ExternalToolResultPayload,
 } from "../../stream-adapter.ts";
+// UPSTREAM_REVIEW:C — the metrics recording hook moved to the public
+// dispatcher (`streamViaCursor`). The metrics regression test below drives
+// the dispatcher with `__setSdkForTests(null)` so the SDK probe short-circuits
+// to the CLI pump deterministically without touching the on-disk setting.
+import { streamViaCursor } from "../../stream-dispatch.ts";
+import { __setSdkForTests } from "../../sdk-runtime.ts";
+import { __resetPathCacheForTests } from "../../path-selector.ts";
 import { clearReadinessCache } from "../../readiness.ts";
 // UPSTREAM_REVIEW:A — pull the live retryable-error regex into the test so the
 // assertion fails loudly if a future refactor drops the `quota_exhausted`
@@ -276,10 +283,15 @@ describe("streamViaCursorCli end-to-end", () => {
 	// UPSTREAM_REVIEW:B — end-to-end proof that the recording hook fires off
 	// the live EventStream.result() resolution path. If the hook is removed or
 	// silently broken, this test catches it.
+	// UPSTREAM_REVIEW:C — drives the dispatcher (which now owns the metrics
+	// hook) with `__setSdkForTests(null)` so the SDK probe short-circuits to
+	// the CLI pump without reading any on-disk setting.
 	test("metrics ring records one success entry after a happy-path fixture run", async () => {
 		process.env.CURSOR_FAKE_FIXTURE = join(FIXTURES, "01-hello-text.ndjson");
+		__setSdkForTests(null);
+		__resetPathCacheForTests();
 
-		const stream = streamViaCursorCli(mockModel(), mockContext());
+		const stream = streamViaCursor(mockModel(), mockContext());
 		await stream.result();
 		// The recording hook is `.then`'d off the same `stream.result()`
 		// promise the test awaited. Yield once to let the second microtask
@@ -294,4 +306,69 @@ describe("streamViaCursorCli end-to-end", () => {
 			"token totals should reflect the fixture's usage block",
 		);
 	});
+
+	// UPSTREAM_REVIEW:C — SDK-path smoke through the dispatcher. Drives a
+	// hand-rolled SdkModule mock end-to-end and asserts the same shape of
+	// `done` AssistantMessage the CLI fixture produces (minus token usage —
+	// the SDK Run interface doesn't surface it).
+	test("dispatcher routes through SDK path when __setSdkForTests provides a mock SDK", async () => {
+		__setSdkForTests(makeFakeSdkModule());
+		__resetPathCacheForTests();
+
+		const stream = streamViaCursor(mockModel(), mockContext());
+		const final = await stream.result();
+
+		assert.equal(final.stopReason, "stop", "SDK path should resolve done");
+		assert.equal(final.provider, "cursor-agent");
+		const text = final.content.find((b) => b.type === "text") as
+			| { type: "text"; text: string }
+			| undefined;
+		assert.ok(text, "SDK path should emit a final text block");
+		assert.match(text.text, /sdk-mock-ok/);
+		// Metrics hook on the dispatcher fires for the SDK path too.
+		await new Promise((r) => setImmediate(r));
+		const snap = metricsSnapshot();
+		assert.equal(snap.sampleCount, 1, "dispatcher should record exactly once for SDK path");
+	});
 });
+
+// UPSTREAM_REVIEW:C — minimal SdkModule mock used by the dispatcher test.
+// Yields one assistant text message and a finished RunResult. Mirrors the
+// `Agent.create → agent.send → run.stream → run.wait` shape sdk-adapter.ts
+// drives.
+function makeFakeSdkModule() {
+	return {
+		Agent: {
+			create: async () => ({
+				agentId: "agent-mock",
+				close() {},
+				async send() {
+					return {
+						id: "run-mock",
+						agentId: "agent-mock",
+						async *stream() {
+							yield {
+								type: "assistant",
+								agent_id: "agent-mock",
+								run_id: "run-mock",
+								message: {
+									role: "assistant",
+									content: [{ type: "text", text: "sdk-mock-ok" }],
+								},
+							};
+						},
+						async wait() {
+							return {
+								id: "run-mock",
+								status: "finished" as const,
+								result: "sdk-mock-ok",
+								durationMs: 10,
+							};
+						},
+						async cancel() {},
+					};
+				},
+			}),
+		},
+	};
+}

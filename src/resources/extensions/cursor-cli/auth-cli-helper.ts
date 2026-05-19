@@ -19,6 +19,15 @@ import { snapshot as metricsSnapshot } from "./metrics.js";
 import { redactSecrets } from "./redact.js";
 import { clearReadinessCache, findWorkingCommand } from "./readiness.js";
 import { parseListModelsOutput } from "./models.js";
+// UPSTREAM_REVIEW:C — `/cursor adapter [sdk|cli]` reads/writes the persistent
+// cursor.adapter setting; `/cursor status` reports the active adapter.
+import {
+	DEFAULT_CURSOR_ADAPTER,
+	readCursorAdapterSetting,
+	writeCursorAdapterSetting,
+	type CursorAdapter,
+} from "./adapter-setting.js";
+import { invalidatePathCache } from "./path-selector.js";
 
 interface ShellOutResult {
 	code: number;
@@ -85,6 +94,9 @@ async function handleStatus(
 	// remaining default ("write-protected"). This is what the user sees
 	// before they run anything.
 	const writePolicy = resolveAllowsWrites(pi ? (name) => pi.getFlag(name) : undefined, undefined);
+	// UPSTREAM_REVIEW:C — surface the resolved adapter so users can see
+	// whether the next slice will go through the SDK or CLI path.
+	const adapter = readCursorAdapterSetting();
 	logToContext(
 		ctx,
 		[
@@ -93,8 +105,36 @@ async function handleStatus(
 			`status: ${statusResult.stdout.trim() || statusResult.stderr.trim() || "unknown"}`,
 			`CURSOR_API_KEY: ${process.env.CURSOR_API_KEY ? "present" : "not set"}`,
 			`write policy: ${describeAllowsWrites(writePolicy)}`,
+			`adapter: ${adapter}${adapter === DEFAULT_CURSOR_ADAPTER ? " (default)" : ""}`,
 		].join("\n"),
 	);
+}
+
+// UPSTREAM_REVIEW:C
+async function handleAdapter(args: string, ctx: ExtensionCommandContext): Promise<void> {
+	const sub = args.trim();
+	if (!sub) {
+		const current = readCursorAdapterSetting();
+		logToContext(
+			ctx,
+			`cursor adapter: ${current}${current === DEFAULT_CURSOR_ADAPTER ? " (default)" : ""}`,
+		);
+		return;
+	}
+	if (sub !== "sdk" && sub !== "cli") {
+		logToContext(ctx, `usage: /cursor adapter [sdk|cli]`);
+		return;
+	}
+	try {
+		writeCursorAdapterSetting(sub as CursorAdapter);
+		invalidatePathCache();
+		logToContext(ctx, `cursor adapter set to "${sub}" (next slice will use the ${sub} path)`);
+	} catch (err) {
+		logToContext(
+			ctx,
+			`failed to write cursor.adapter: ${(err as Error).message}`,
+		);
+	}
 }
 
 async function handleLogin(_args: string, ctx: ExtensionCommandContext): Promise<void> {
@@ -186,19 +226,23 @@ async function handleRoot(
 		case "doctor":
 			await handleDoctor(rest, ctx);
 			return;
+		// UPSTREAM_REVIEW:C
+		case "adapter":
+			await handleAdapter(rest, ctx);
+			return;
 		default:
 			logToContext(
 				ctx,
-				`unknown subcommand: ${sub}. Try: status | login | logout | models | resume <id> | doctor`,
+				`unknown subcommand: ${sub}. Try: status | login | logout | models | resume <id> | doctor | adapter [sdk|cli]`,
 			);
 	}
 }
 
 export function registerCursorCommands(pi: ExtensionAPI): void {
-	// UPSTREAM_REVIEW:B — `doctor` added to the subcommand list.
+	// UPSTREAM_REVIEW:C — `adapter` joins the subcommand list.
 	pi.registerCommand("cursor", {
 		description:
-			"Manage the Cursor CLI provider (status / login / logout / models / resume / doctor)",
+			"Manage the Cursor CLI provider (status / login / logout / models / resume / doctor / adapter)",
 		handler: (args, ctx) => handleRoot(args, ctx, pi),
 	});
 }
