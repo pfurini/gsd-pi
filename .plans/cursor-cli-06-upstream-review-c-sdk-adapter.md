@@ -48,12 +48,15 @@ The parent plan's defence framing:
 
 A second streaming path inside `cursor-cli/` that:
 
-1. Is selected via env var `GSD_CURSOR_USE_SDK=1` while the SDK is in
-   public beta. Default = CLI path.
+1. Is selected via a persistent setting `cursor.adapter` (string,
+   `"sdk" | "cli"`, default `"sdk"`). Users switch to the CLI path by
+   setting `cursor.adapter = "cli"` in settings.json or by running
+   `/cursor adapter cli`. No environment variable, no hidden flag.
 2. Dynamically imports `@cursor/sdk` (no hard dependency in package.json
    if avoidable — match `claude-code-cli`'s pattern with
-   `createRequire(import.meta.url).resolve(...)`). On resolve failure,
-   logs a one-line warning and falls back to the CLI path.
+   `createRequire(import.meta.url).resolve(...)`). On resolve failure
+   while `cursor.adapter === "sdk"`, logs a one-line warning and falls
+   back to the CLI path for the current process.
 3. Drives `Agent.create({ apiKey: <env>, model, local: { cwd } })` and
    consumes `run.stream()`, mapping the discriminated `SDKMessage` union
    into the same `AssistantMessageEvent`s the CLI path emits.
@@ -75,15 +78,20 @@ Every change tagged `// UPSTREAM_REVIEW:C`.
 - `sdk-types.ts` extension — additional type mirrors for the SDK message
   union (NOT a hard dependency on `@cursor/sdk`).
 - A path-selector wrapper that the extension entry point uses:
-  reads `GSD_CURSOR_USE_SDK`; tries dynamic import; on success uses
-  SDK adapter; on failure logs + falls back to CLI.
+  reads `cursor.adapter` from settings.json; if `"sdk"` (default),
+  tries dynamic import and on success uses the SDK adapter; on import
+  failure logs + falls back to CLI for the current process. If
+  `"cli"`, skips the SDK probe entirely and uses the CLI path.
 - Shared event-translation primitives between CLI and SDK paths: the
   partial-builder, `mapCursorEvent` shape, and the
   `AssistantMessageEvent` emitter should be re-usable.
 - Tests:
   - SDK message → GSD event mapping (unit tests using mock SDK)
-  - feature flag selector tests
-  - dynamic-import fallback test (when SDK is missing)
+  - setting-driven path-selector tests (`cursor.adapter` = `"sdk"` /
+    `"cli"` / unset / invalid value)
+  - dynamic-import fallback test (when SDK is missing and the setting
+    is `"sdk"`)
+  - `/cursor adapter <sdk|cli>` subcommand writes the setting
 - `// UPSTREAM_REVIEW:C` markers.
 - Document the passthrough story in the file header — what GSD does NOT
   proxy.
@@ -96,8 +104,10 @@ Every change tagged `// UPSTREAM_REVIEW:C`.
   tool calls as opaque external execution; the SDK path should do the
   same. (Slice still gets the ToolCall block in its AssistantMessage
   history, but the execution lives inside Cursor.)
-- Replacing the CLI path. CLI remains the GA default; SDK is opt-in
-  for the foreseeable future, until Cursor declares the SDK GA.
+- Removing the CLI path. SDK is the default; CLI remains a fully
+  supported selection users can switch to via `cursor.adapter = "cli"`
+  (e.g., for environments where the SDK can't initialise, or when
+  diagnosing a suspected SDK regression).
 
 ## Investigation (must be done first)
 
@@ -147,15 +157,12 @@ The path selector:
 // UPSTREAM_REVIEW:C — Phase 2 SDK passthrough path.
 
 import { redactSecrets } from "./redact.js";
+import { readCursorAdapterSetting } from "./adapter-setting.js";
 
 let cachedSdk: unknown | null | undefined = undefined;
 
 async function loadSdk(): Promise<unknown | null> {
     if (cachedSdk !== undefined) return cachedSdk as unknown | null;
-    if (process.env.GSD_CURSOR_USE_SDK !== "1") {
-        cachedSdk = null;
-        return null;
-    }
     try {
         cachedSdk = await import(/* webpackIgnore: true */ "@cursor/sdk");
         return cachedSdk;
@@ -168,12 +175,21 @@ async function loadSdk(): Promise<unknown | null> {
 }
 
 export async function pickStreamPath() {
+    const selected = readCursorAdapterSetting();   // "sdk" | "cli"
+    if (selected === "cli") return { kind: "cli" as const };
     const sdk = await loadSdk();
     return sdk
         ? { kind: "sdk" as const, sdk }
         : { kind: "cli" as const };
 }
 ```
+
+`adapter-setting.ts` reads `cursor.adapter` from the global
+settings.json (path resolved via `getSettingsPath()` from
+`@gsd/pi-coding-agent`), defaulting to `"sdk"`. Invalid values fall
+back to the default and emit a one-line stderr warning. A companion
+`writeCursorAdapterSetting(value)` performs an atomic file lock +
+JSON merge so `/cursor adapter` and direct file edits don't race.
 
 The `index.ts` registration changes from:
 
@@ -230,12 +246,21 @@ export function streamViaCursor(model, context, options): AssistantMessageEventS
 5. **Add tests**:
    - `sdk-adapter.test.ts`: mock the SDK as a synthesised AsyncIterable
      of `SDKMessage` values; drive `pumpViaSdk`; assert event emission.
-   - `path-selector.test.ts`: env flag on + SDK present → sdk path;
-     env flag on + SDK missing → cli fallback; env flag off → cli path.
+   - `path-selector.test.ts`: setting `"sdk"` + SDK present → sdk path;
+     setting `"sdk"` + SDK missing → cli fallback; setting `"cli"` →
+     cli path (SDK probe skipped); setting missing → defaults to
+     `"sdk"`; invalid setting value → defaults to `"sdk"` with
+     stderr warning.
    - `sdk-runtime.test.ts`: importing a missing module returns null
      and warns to stderr (matched against `redactSecrets` output).
+   - `adapter-setting.test.ts`: read default, read explicit value,
+     write + read round-trip, invalid value handling, concurrent
+     write safety.
 6. **Update `/cursor status`** (`auth-cli-helper.ts`) to report the
-   active path (`"path: cli"` or `"path: sdk (beta)"`).
+   active path (`"adapter: sdk (beta)"` or `"adapter: cli"`) and add
+   a `/cursor adapter [sdk|cli]` subcommand: with no argument, prints
+   the current setting; with an argument, writes it and clears any
+   path-selector caches so the next slice picks up the change.
 7. **Add to integration suite (plan #02)**: extend the fake CLI shim
    strategy with a parallel SDK-shim — a small ESM module that
    exports a fake `Agent` class. Mount it via dynamic-import
@@ -255,10 +280,12 @@ export function streamViaCursor(model, context, options): AssistantMessageEventS
 - `src/resources/extensions/cursor-cli/sdk-adapter.ts`
 - `src/resources/extensions/cursor-cli/sdk-runtime.ts`
 - `src/resources/extensions/cursor-cli/path-selector.ts`
+- `src/resources/extensions/cursor-cli/adapter-setting.ts`
 - `src/resources/extensions/cursor-cli/stream-translation.ts` (refactor)
 - `src/resources/extensions/cursor-cli/tests/sdk-adapter.test.ts`
 - `src/resources/extensions/cursor-cli/tests/sdk-runtime.test.ts`
 - `src/resources/extensions/cursor-cli/tests/path-selector.test.ts`
+- `src/resources/extensions/cursor-cli/tests/adapter-setting.test.ts`
 - (optional) `src/resources/extensions/cursor-cli/tests/integration/fake-sdk.mjs`
 
 ### Modify
@@ -271,7 +298,8 @@ export function streamViaCursor(model, context, options): AssistantMessageEventS
 - `src/resources/extensions/cursor-cli/index.ts` — register
   `streamViaCursor` instead of `streamViaCursorCli`
 - `src/resources/extensions/cursor-cli/auth-cli-helper.ts` — `/cursor
-  status` includes active path
+  status` reports the active adapter; new `/cursor adapter [sdk|cli]`
+  subcommand reads / writes the `cursor.adapter` setting
 - (optional) `package.json` — no hard dep on `@cursor/sdk`. If a
   *types* package is available (`@cursor/sdk` may ship types-only as a
   devDep), add to `devDependencies` only.
@@ -291,11 +319,11 @@ The passthrough framing is the defence. Concretely:
 
 Upstream-PR postures:
 
-**A. Land behind the existing `GSD_CURSOR_USE_SDK=1` flag, default off.**
-Cleanest defence. The maintainer can opt the entire feature out of the
-default build by stripping the env-var check, leaving the SDK call
-sites unreachable. The path selector graceful-fallback means the worst
-case is "CLI behaviour unchanged."
+**A. Land as the default adapter.** `cursor.adapter` defaults to
+`"sdk"`; the CLI path stays fully supported via
+`cursor.adapter = "cli"`. The path-selector's graceful-fallback on
+SDK import failure means the worst case is "CLI behaviour
+unchanged." Users who need CLI semantics flip the setting once.
 
 **B. Keep fork-only.** Most conservative.
 
@@ -319,14 +347,20 @@ maintainer.
 
 ## Acceptance criteria
 
-- ✅ `GSD_CURSOR_USE_SDK=1` with `@cursor/sdk` installed runs slices
-  via the SDK and produces identical-shape `AssistantMessage`s as the
-  CLI path on the equivalent fixture.
-- ✅ `GSD_CURSOR_USE_SDK=1` without `@cursor/sdk` installed logs a
-  single redacted warning and falls back to CLI without throwing.
-- ✅ Default (no env var) — CLI path unchanged from Phase 1 baseline.
+- ✅ Default (`cursor.adapter` unset) with `@cursor/sdk` installed
+  runs slices via the SDK and produces identical-shape
+  `AssistantMessage`s as the CLI path on the equivalent fixture.
+- ✅ Default with `@cursor/sdk` missing logs a single redacted
+  warning and falls back to CLI without throwing.
+- ✅ `cursor.adapter = "cli"` skips the SDK probe entirely and runs
+  slices via the CLI path — byte-for-byte unchanged from the Phase 1
+  baseline (proven by re-running the plan #01 fixture suite with the
+  setting flipped).
+- ✅ `/cursor adapter` with no argument prints the current adapter;
+  `/cursor adapter sdk` and `/cursor adapter cli` write the setting
+  and invalidate the path-selector cache.
 - ✅ Refactor verified: every plan #01–#05 test still passes.
-- ✅ `/cursor status` reports the active path.
+- ✅ `/cursor status` reports the active adapter.
 - ✅ `// UPSTREAM_REVIEW:C` markers present on every changed line; the
   audit assertion (from plan #04 / #05's marker-audit test) passes.
 - ✅ `npm run verify:pr` passes.
@@ -380,19 +414,24 @@ git checkout -b feat/cursor-cli-sdk-adapter
 npm install --save-dev @cursor/sdk    # devDep only, types
 # ... implement per "Implementation steps" ...
 
-# Verify SDK path
-GSD_CURSOR_USE_SDK=1 node --import ./scripts/dist-test-resolve.mjs \
-  --experimental-strip-types \
+# Verify SDK path (default)
+node --import ./scripts/dist-test-resolve.mjs \
+  --experimental-test-isolation=process \
   --test "dist-test/src/resources/extensions/cursor-cli/tests/sdk-adapter.test.js"
 
-# Verify CLI path unchanged
-node --import ./scripts/dist-test-resolve.mjs --experimental-strip-types \
+# Verify CLI path by flipping the setting
+node dist/loader.js
+# inside GSD: /cursor adapter cli
+# then re-run the plan #01 fixture suite — CLI path byte-stable
+
+node --import ./scripts/dist-test-resolve.mjs \
+  --experimental-test-isolation=process \
   --test "dist-test/src/resources/extensions/cursor-cli/tests/*.test.js"
 
-# Verify fallback when SDK absent
+# Verify fallback when SDK absent (setting still defaults to "sdk")
 npm uninstall @cursor/sdk
-GSD_CURSOR_USE_SDK=1 node dist/loader.js
-# expect single stderr warning, CLI path used
+node dist/loader.js
+# expect single stderr warning, CLI path used for this process
 
 # Reinstall + full preflight
 npm install --save-dev @cursor/sdk
