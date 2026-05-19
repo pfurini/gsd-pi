@@ -27,7 +27,21 @@ const esbuild = require(join(ROOT, 'node_modules/esbuild'));
 
 // Recursively collect files by extension (skip node_modules, templates, etc.)
 // Directories to skip during file collection
-const SKIP_DIRS = new Set(['node_modules', 'templates', 'integration']);
+const SKIP_DIRS = new Set(['node_modules', 'templates']);
+
+// `integration` directories are skipped by default — they run from source via
+// the separate `test:integration` script. Exceptions are explicitly opted in:
+// the cursor-cli end-to-end tests need to compile to dist-test/ because they
+// run under `test:unit:compiled` (they exercise the spawn/pump loop with a
+// fake binary and there is no equivalent path in the source-only runner).
+const COMPILE_INTEGRATION_ALLOWLIST = [
+  'src/resources/extensions/cursor-cli/tests/integration',
+];
+
+function shouldSkipIntegrationDir(absPath) {
+  const normalized = absPath.replaceAll('\\', '/');
+  return !COMPILE_INTEGRATION_ALLOWLIST.some(suffix => normalized.endsWith(suffix));
+}
 
 async function collectFiles(dir, exts = ['.ts', '.mjs']) {
   const results = [];
@@ -40,6 +54,7 @@ async function collectFiles(dir, exts = ['.ts', '.mjs']) {
   for (const entry of entries) {
     if (SKIP_DIRS.has(entry.name)) continue;
     const full = join(dir, entry.name);
+    if (entry.name === 'integration' && entry.isDirectory() && shouldSkipIntegrationDir(full)) continue;
     if (entry.isDirectory()) {
       results.push(...await collectFiles(full, exts));
     } else if (
@@ -63,6 +78,7 @@ async function collectAllFiles(dir) {
   for (const entry of entries) {
     if (ASSET_SKIP_DIRS.has(entry.name)) continue;
     const full = join(dir, entry.name);
+    if (entry.name === 'integration' && entry.isDirectory() && shouldSkipIntegrationDir(full)) continue;
     if (entry.isDirectory()) {
       results.push(...await collectAllFiles(full));
     } else if (entry.isFile()) {
@@ -73,7 +89,7 @@ async function collectAllFiles(dir) {
 }
 
 // Dirs to skip when copying assets (node_modules are never useful in dist-test)
-const ASSET_SKIP_DIRS = new Set(['node_modules', 'integration']);
+const ASSET_SKIP_DIRS = new Set(['node_modules']);
 
 /**
  * Recursively copy files from srcDir to destDir.
@@ -94,6 +110,7 @@ async function copyAssets(srcDir, destDir, options = {}) {
     if (ASSET_SKIP_DIRS.has(entry.name)) continue;
     const srcPath = join(srcDir, entry.name);
     const destPath = join(destDir, entry.name);
+    if (entry.name === 'integration' && entry.isDirectory() && shouldSkipIntegrationDir(srcPath)) continue;
     if (entry.isDirectory()) {
       await copyAssets(srcPath, destPath, options);
     } else {
