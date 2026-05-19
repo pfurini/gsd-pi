@@ -1,0 +1,12 @@
+{
+  "id": "cursor-cli",
+  "name": "Cursor CLI",
+  "version": "1.0.0",
+  "description": "Cursor (via your subscription): delegate inference to the cursor-agent CLI",
+  "tier": "bundled",
+  "requires": { "platform": ">=2.29.0" },
+  "provides": {
+    "commands": ["cursor"],
+    "hooks": []
+  }
+}

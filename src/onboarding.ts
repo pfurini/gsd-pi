@@ -18,6 +18,7 @@ import { renderGsdPiLogo, GSD_PI_BRAND, GSD_WEBSITE } from './logo.js'
 import { agentDir } from './app-paths.js'
 import { isClaudeCliReady } from './claude-cli-check.js'
 import { isAntigravityCliReady, isGeminiCliReady } from './resources/extensions/google-cli/readiness.js'
+import { isCursorCliReady } from './cursor-cli-check.js'
 import {
   markOnboardingComplete,
   markStepCompleted,
@@ -96,6 +97,7 @@ const LLM_PROVIDER_IDS = Array.from(new Set([
   ...getLlmProviderIds(),
   'anthropic-vertex',
   'ollama',
+  'cursor-agent',
 ]))
 
 /** API key prefix validation — loose checks to catch obvious mistakes */
@@ -422,6 +424,14 @@ export async function runLlmStep(p: ClackModule, pc: PicoModule, authStorage: Au
     )
   }
 
+  // Surface Cursor CLI when the binary is installed and authenticated — gives
+  // paid Cursor subscribers multi-model routing without per-provider keys.
+  if (isCursorCliReady()) {
+    authOptions.push(
+      { value: 'cursor-cli', label: 'Cursor (via your subscription)', hint: 'multi-model routing through your Cursor plan' },
+    )
+  }
+
   authOptions.push(
     { value: 'browser', label: 'Sign in with your browser', hint: 'GitHub Copilot or ChatGPT/Codex' },
     { value: 'api-key', label: 'Paste an API key', hint: 'from your provider dashboard' },
@@ -460,6 +470,15 @@ export async function runLlmStep(p: ClackModule, pc: PicoModule, authStorage: Au
     p.log.info('Your Antigravity session will be used for inference. No API key needed.')
     authStorage.set('google-antigravity', { type: 'api_key', key: 'cli' })
     persistDefaultProvider('google-antigravity')
+    return true
+  }
+
+  // ── Cursor CLI path ─────────────────────────────────────────────────────
+  if (method === 'cursor-cli') {
+    p.log.success('Cursor CLI detected — routing through your Cursor subscription')
+    p.log.info('Inference is billed against your Cursor plan. No GSD-side credentials are stored.')
+    authStorage.set('cursor-agent', { type: 'api_key', key: 'cli' })
+    persistDefaultProvider('cursor-agent')
     return true
   }
 
