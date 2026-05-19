@@ -3,13 +3,15 @@ import assert from "node:assert/strict";
 import type { Api, AssistantMessage, Model } from "@gsd/pi-ai";
 import {
 	buildCursorArgs,
-	buildFinalAssistantContent,
 	buildPromptFromContext,
+} from "../stream-adapter.ts";
+import {
+	buildFinalAssistantContent,
 	mapCursorEvent,
 	mergePendingToolCalls,
 	normalizeToolResultOutput,
 	type ExternalToolResultPayload,
-} from "../stream-adapter.ts";
+} from "../stream-translation.ts";
 import type { CursorStreamEvent } from "../sdk-types.ts";
 
 function mockModel(id = "composer-2.5"): Model<Api> {

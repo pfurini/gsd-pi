@@ -26,7 +26,7 @@ import { fileURLToPath } from "node:url";
 import { Readable } from "node:stream";
 import type { AssistantMessage, AssistantMessageEvent } from "@gsd/pi-ai";
 import { parseNdjson } from "../ndjson-parser.ts";
-import { mapCursorEvent } from "../stream-adapter.ts";
+import { mapCursorEvent } from "../stream-translation.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURES_DIR = join(HERE, "fixtures");

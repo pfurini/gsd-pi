@@ -28,10 +28,14 @@ import { join, relative, sep } from "node:path";
 const MARKER_A = `UPSTREAM_${"REVIEW"}:A`;
 const MARKER_B = `UPSTREAM_${"REVIEW"}:B`;
 
-/** Repo-relative file paths expected to contain at least one :A marker. */
+/** Repo-relative file paths expected to contain at least one :A marker.
+ *
+ * NOTE (plan #06 refactor): the `result.is_error` classifier moved from
+ * `stream-adapter.ts` into the shared `stream-translation.ts` module so the
+ * SDK path inherits it. The marker list follows the code. */
 const EXPECTED_FILES_A: ReadonlyArray<string> = [
 	"src/resources/extensions/cursor-cli/quota-detect.ts",
-	"src/resources/extensions/cursor-cli/stream-adapter.ts",
+	"src/resources/extensions/cursor-cli/stream-translation.ts",
 	"src/resources/extensions/cursor-cli/tests/integration/stream-end-to-end.test.ts",
 	"src/resources/extensions/cursor-cli/tests/upstream-review-markers.test.ts",
 	"packages/pi-coding-agent/src/core/retryable-error-regex.ts",
