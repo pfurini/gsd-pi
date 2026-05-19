@@ -1,0 +1,2 @@
+# Intermediate raw captures are never committed; the rule lives in
+# raw/.gitignore so the marker file documents the policy in place.

@@ -1,0 +1,1 @@
+There are three files at ./a.txt, ./b.txt and ./c.txt in the current workspace. Read each one with the read_file tool, in that exact order, then reply with their contents concatenated by a single space, no quotes, no extra words.

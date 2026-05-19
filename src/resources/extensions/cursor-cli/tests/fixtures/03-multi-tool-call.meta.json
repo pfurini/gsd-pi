@@ -1,0 +1,11 @@
+{
+  "fixture": "03-multi-tool-call",
+  "cursor_agent_version": "2026.05.16-0338208",
+  "model": "composer-2",
+  "prompt_file": "prompts/03-multi-step.txt",
+  "sanitised_at": "2026-05-19T16:14:13Z",
+  "raw_bytes": 13089,
+  "raw_lines": 64,
+  "sanitised_bytes": 10812,
+  "sanitised_lines": 64
+}

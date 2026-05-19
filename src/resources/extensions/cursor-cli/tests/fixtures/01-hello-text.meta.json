@@ -1,0 +1,11 @@
+{
+  "fixture": "01-hello-text",
+  "cursor_agent_version": "2026.05.16-0338208",
+  "model": "composer-2",
+  "prompt_file": "prompts/01-hello.txt",
+  "sanitised_at": "2026-05-19T16:11:09Z",
+  "raw_bytes": 1291,
+  "raw_lines": 6,
+  "sanitised_bytes": 1070,
+  "sanitised_lines": 6
+}

@@ -1,0 +1,62 @@
+{
+  "model": "composer-2",
+  "events": [],
+  "final": {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "toolCall",
+        "id": "tool_26767c39-caca-4fed-89ba-2bcabc46cb2",
+        "name": "read",
+        "arguments": {
+          "path": "/tmp/cursor-fixture.XXXXXX/hello.txt"
+        },
+        "externalResult": {
+          "content": [
+            {
+              "type": "text",
+              "text": "fixture-hello\n"
+            }
+          ],
+          "isError": false,
+          "details": {
+            "content": "fixture-hello\n",
+            "isEmpty": false,
+            "exceededLimit": false,
+            "totalLines": 2,
+            "fileSize": 14,
+            "path": "/tmp/cursor-fixture.XXXXXX/hello.txt",
+            "readRange": {
+              "startLine": 1,
+              "endLine": 2
+            },
+            "relatedCursorRulePaths": [],
+            "relatedCursorRules": []
+          }
+        }
+      },
+      {
+        "type": "text",
+        "text": "fixture-hello\n\n"
+      }
+    ],
+    "api": "cursor-stream-json",
+    "provider": "cursor-agent",
+    "model": "composer-2",
+    "usage": {
+      "input": 26738,
+      "output": 725,
+      "cacheRead": 31488,
+      "cacheWrite": 0,
+      "totalTokens": 27463,
+      "cost": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "total": 0
+      }
+    },
+    "stopReason": "stop"
+  }
+}

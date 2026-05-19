@@ -1,0 +1,11 @@
+{
+  "fixture": "02-single-tool-call",
+  "cursor_agent_version": "2026.05.16-0338208",
+  "model": "composer-2",
+  "prompt_file": "prompts/02-read-fixture.txt",
+  "sanitised_at": "2026-05-19T16:13:19Z",
+  "raw_bytes": 5403,
+  "raw_lines": 28,
+  "sanitised_bytes": 4386,
+  "sanitised_lines": 28
+}

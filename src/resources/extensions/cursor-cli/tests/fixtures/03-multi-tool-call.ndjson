@@ -1,0 +1,64 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/tmp/fixture-workspace","session_id":"sess-XXXXXXXX","model":"Composer 2","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"There are three files at ./a.txt, ./b.txt and ./c.txt in the current workspace. Read each one with the read_file tool, in that exact order, then reply with their contents concatenated by a single space, no quotes, no extra words."}]},"session_id":"sess-XXXXXXXX"}
+{"type":"thinking","subtype":"delta","text":"The user wants me to","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"thinking","subtype":"delta","text":" read three files a.txt,","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"thinking","subtype":"delta","text":" b.txt, and c.txtusing","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"thinking","subtype":"delta","text":" the read_file tool.","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"thinking","subtype":"delta","text":"\n\nI need to use the ","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"thinking","subtype":"delta","text":"available \"Read\" tool","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"thinking","subtype":"delta","text":" instead of \"read_file\"","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"thinking","subtype":"delta","text":" to access the three","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"thinking","subtype":"delta","text":" files a.txt, b.txt,","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"thinking","subtype":"delta","text":" and c.txt. Since the","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"thinking","subtype":"delta","text":" user specified \"in ","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"thinking","subtype":"delta","text":"that exact order\" and","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"thinking","subtype":"delta","text":" wants concatenation","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"thinking","subtype":"delta","text":" in order a, b, c, I","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"thinking","subtype":"delta","text":" will read them sequentially","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"thinking","subtype":"delta","text":" to maintain the correct","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"thinking","subtype":"delta","text":" order. Reading them","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"thinking","subtype":"delta","text":" in parallel might not","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"thinking","subtype":"delta","text":" guarantee the order","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"thinking","subtype":"delta","text":" of results in the response.","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"thinking","subtype":"completed","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":" `"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"a"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":".txt"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"`,"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":" `"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"b"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":".txt"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"`,"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":" and"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":" `"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"c"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":".txt"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"`"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":" in"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":" order"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":" ("}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"using"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":" the"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":" Read"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":" tool"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":").\n\n"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Reading `a.txt`, `b.txt`, and `c.txt` in order (using the Read tool).\n\n"}]},"session_id":"sess-XXXXXXXX","model_call_id":"138acb4d-df3c-4c04-b219-fed808aa1485-0-nzi1","timestamp_ms":0}
+{"type":"tool_call","subtype":"started","call_id":"tool_590d37ea-d9f0-42db-9d27-7b431a92f5a","tool_call":{"readToolCall":{"args":{"path":"/tmp/cursor-fixture.XXXXXX/a.txt"}}},"model_call_id":"138acb4d-df3c-4c04-b219-fed808aa1485-0-nzi1","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"tool_call","subtype":"completed","call_id":"tool_590d37ea-d9f0-42db-9d27-7b431a92f5a","tool_call":{"readToolCall":{"args":{"path":"/tmp/cursor-fixture.XXXXXX/a.txt"},"result":{"success":{"content":"alpha\n","isEmpty":false,"exceededLimit":false,"totalLines":2,"fileSize":6,"path":"/tmp/cursor-fixture.XXXXXX/a.txt","readRange":{"startLine":1,"endLine":2},"relatedCursorRulePaths":[],"relatedCursorRules":[]}}}},"model_call_id":"138acb4d-df3c-4c04-b219-fed808aa1485-0-nzi1","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"tool_call","subtype":"started","call_id":"tool_a6d0c5e2-c739-47ea-a3b2-416cf9b96ac","tool_call":{"readToolCall":{"args":{"path":"/tmp/cursor-fixture.XXXXXX/b.txt"}}},"model_call_id":"138acb4d-df3c-4c04-b219-fed808aa1485-0-nzi1","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"tool_call","subtype":"completed","call_id":"tool_a6d0c5e2-c739-47ea-a3b2-416cf9b96ac","tool_call":{"readToolCall":{"args":{"path":"/tmp/cursor-fixture.XXXXXX/b.txt"},"result":{"success":{"content":"bravo\n","isEmpty":false,"exceededLimit":false,"totalLines":2,"fileSize":6,"path":"/tmp/cursor-fixture.XXXXXX/b.txt","readRange":{"startLine":1,"endLine":2},"relatedCursorRulePaths":[],"relatedCursorRules":[]}}}},"model_call_id":"138acb4d-df3c-4c04-b219-fed808aa1485-0-nzi1","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"tool_call","subtype":"started","call_id":"tool_4945a523-207b-42ab-97b7-45e6ea7401e","tool_call":{"readToolCall":{"args":{"path":"/tmp/cursor-fixture.XXXXXX/c.txt"}}},"model_call_id":"138acb4d-df3c-4c04-b219-fed808aa1485-0-nzi1","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"tool_call","subtype":"completed","call_id":"tool_4945a523-207b-42ab-97b7-45e6ea7401e","tool_call":{"readToolCall":{"args":{"path":"/tmp/cursor-fixture.XXXXXX/c.txt"},"result":{"success":{"content":"charlie\n","isEmpty":false,"exceededLimit":false,"totalLines":2,"fileSize":8,"path":"/tmp/cursor-fixture.XXXXXX/c.txt","readRange":{"startLine":1,"endLine":2},"relatedCursorRulePaths":[],"relatedCursorRules":[]}}}},"model_call_id":"138acb4d-df3c-4c04-b219-fed808aa1485-0-nzi1","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"thinking","subtype":"delta","text":"The file a.txt contains","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"thinking","subtype":"delta","text":" the string \"alpha\" ","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"thinking","subtype":"delta","text":"followed by a newline","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"thinking","subtype":"delta","text":" character.","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"thinking","subtype":"completed","session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"alpha"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":" br"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"avo"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":" char"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"lie"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"alpha bravo charlie"}]},"session_id":"sess-XXXXXXXX"}
+{"type":"result","subtype":"success","duration_ms":0,"duration_api_ms":0,"is_error":false,"result":"Reading `a.txt`, `b.txt`, and `c.txt` in order (using the Read tool).\n\nalpha bravo charlie","session_id":"sess-XXXXXXXX","request_id":"sess-XXXXXXXX","usage":{"inputTokens":27012,"outputTokens":550,"cacheReadTokens":31488,"cacheWriteTokens":0}}

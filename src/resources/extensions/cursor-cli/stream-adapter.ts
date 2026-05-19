@@ -356,12 +356,35 @@ export function mapCursorEvent(
 
 		case "tool_call": {
 			const call = event as CursorToolCallEvent;
-			const toolCall = toolCallFromCursorBlock(call.tool_call_id, call.name, call.input);
-			state.intermediateToolBlocks.push(toolCall);
+			const extracted = extractToolCallFields(call);
+			if (!extracted.id) return { events };
+
+			if (call.subtype === "completed") {
+				// Final form: ensure the block is recorded with up-to-date
+				// args (in case `started` was missed) and attach the embedded
+				// result so Agent Core renders it under `externalToolExecution`.
+				upsertToolCallBlock(state.intermediateToolBlocks, extracted);
+				if (extracted.result) {
+					state.toolResultsById.set(extracted.id, extracted.result);
+					attachExternalResultsToToolBlocks(
+						state.intermediateToolBlocks,
+						state.toolResultsById,
+					);
+				}
+				return { events };
+			}
+
+			// Default / `started`: register the block; result (if any) arrives
+			// on the matching `completed` event.
+			upsertToolCallBlock(state.intermediateToolBlocks, extracted);
 			return { events };
 		}
 
 		case "tool_result": {
+			// Forward-compatible path — the live binary (2026.05) folds
+			// results into `tool_call:completed` and never emits this event,
+			// but we keep the handler so older or future binaries that emit
+			// standalone results still work.
 			const result = event as CursorToolResultEvent;
 			const payload: ExternalToolResultPayload = {
 				content: normalizeToolResultOutput(result.output),
@@ -369,6 +392,14 @@ export function mapCursorEvent(
 			};
 			state.toolResultsById.set(result.tool_call_id, payload);
 			attachExternalResultsToToolBlocks(state.intermediateToolBlocks, state.toolResultsById);
+			return { events };
+		}
+
+		case "thinking":
+		case "user": {
+			// fixture-derived (see plan #01): the live binary emits these in
+			// `-p` mode even though the docs claim it doesn't. GSD's print
+			// rendering doesn't surface either, so consume them silently.
 			return { events };
 		}
 
@@ -401,7 +432,7 @@ export function mapCursorEvent(
 				api: "cursor-stream-json",
 				provider: "cursor-agent",
 				model: state.model,
-				usage: mapUsage(result.usage ?? { input_tokens: 0, output_tokens: 0 }),
+				usage: mapUsage(result.usage ?? {}),
 				stopReason: mapStopReason(result.subtype, result.is_error),
 				timestamp: Date.now(),
 			};
@@ -423,6 +454,114 @@ export function mapCursorEvent(
 			return { events };
 		}
 	}
+}
+
+/**
+ * Extracted, normalised view of a `tool_call` event regardless of which
+ * wire shape (documented flat vs fixture-derived nested) the binary used.
+ */
+interface ExtractedToolCall {
+	id: string;
+	name: string;
+	args: Record<string, unknown>;
+	result?: ExternalToolResultPayload;
+}
+
+/**
+ * Normalise a Cursor `tool_call` event into `{id, name, args, result?}`.
+ *
+ * Handles both the documented flat shape (`tool_call_id`, `name`, `input`)
+ * and the fixture-derived nested shape where the tool name is the object
+ * key inside `tool_call.<X>ToolCall` and args/result hang underneath.
+ */
+export function extractToolCallFields(event: CursorToolCallEvent): ExtractedToolCall {
+	const id = event.call_id ?? event.tool_call_id ?? "";
+	let name = typeof event.name === "string" ? event.name : "";
+	let args: Record<string, unknown> = {};
+	let result: ExternalToolResultPayload | undefined;
+
+	if (event.input && typeof event.input === "object" && !Array.isArray(event.input)) {
+		args = event.input as Record<string, unknown>;
+	}
+
+	if (event.tool_call && typeof event.tool_call === "object") {
+		// Polymorphic container: pick the first <X>ToolCall key with a payload.
+		for (const [key, payload] of Object.entries(event.tool_call)) {
+			if (!payload || typeof payload !== "object") continue;
+			if (!name) name = toolNameFromContainerKey(key);
+			const inner = payload as { args?: unknown; result?: { success?: Record<string, unknown>; error?: Record<string, unknown> } };
+			if (inner.args && typeof inner.args === "object" && !Array.isArray(inner.args)) {
+				args = inner.args as Record<string, unknown>;
+			}
+			if (inner.result) {
+				result = normaliseEmbeddedToolResult(inner.result);
+			}
+			break;
+		}
+	}
+
+	return { id, name, args, result };
+}
+
+/** Convert `readToolCall` / `editToolCall` container keys to readable tool names. */
+function toolNameFromContainerKey(key: string): string {
+	const stripped = key.endsWith("ToolCall") ? key.slice(0, -"ToolCall".length) : key;
+	if (stripped.length === 0) return key;
+	// Leave camelCase as-is — downstream renderers can pretty-print further.
+	return stripped;
+}
+
+/**
+ * Convert the embedded `result` block from a `tool_call:completed` event
+ * (`{success: {...}} | {error: {...}}`) into the `ExternalToolResultPayload`
+ * Agent Core expects.
+ */
+function normaliseEmbeddedToolResult(result: {
+	success?: Record<string, unknown>;
+	error?: Record<string, unknown>;
+}): ExternalToolResultPayload {
+	if (result.error) {
+		return {
+			content: normalizeToolResultOutput(result.error),
+			isError: true,
+		};
+	}
+	const success = result.success ?? {};
+	// Most file-reading tools surface their primary payload under `content`.
+	if (typeof success.content === "string") {
+		return {
+			content: [{ type: "text", text: success.content }],
+			isError: false,
+			details: success,
+		};
+	}
+	return {
+		content: normalizeToolResultOutput(success),
+		isError: false,
+		details: success,
+	};
+}
+
+/**
+ * Insert a new tool-call block keyed by `id` or, if one already exists,
+ * update its `name` / `arguments` in place. Used so a `subtype:"completed"`
+ * event that arrives without a preceding `started` still produces a single,
+ * coherent block.
+ */
+function upsertToolCallBlock(
+	intermediate: AssistantMessage["content"],
+	extracted: ExtractedToolCall,
+): void {
+	for (const block of intermediate) {
+		if (block.type === "toolCall" && block.id === extracted.id) {
+			if (extracted.name) block.name = extracted.name;
+			if (extracted.args && Object.keys(extracted.args).length > 0) {
+				block.arguments = extracted.args;
+			}
+			return;
+		}
+	}
+	intermediate.push(toolCallFromCursorBlock(extracted.id, extracted.name, extracted.args));
 }
 
 function ingestAssistantBlock(block: CursorContentBlock, state: StreamState): void {

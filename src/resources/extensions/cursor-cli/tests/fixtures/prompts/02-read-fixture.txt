@@ -1,0 +1,1 @@
+There is a file at ./hello.txt in the current workspace. Read it once with the read_file tool and reply with exactly its contents, no quotes, no extra words.

@@ -1,6 +1,26 @@
 # Cursor CLI #01 — Live-binary NDJSON fixtures + replay validation
 
-## Status: DRAFT — Awaiting implementation
+## Status: IMPLEMENTED — fixtures captured, drift patched
+
+Implemented on `feat/cursor-cli-full-power`. Live fixtures captured against
+`cursor-agent 2026.05.16-0338208` (`composer-2`). Drift detected and
+patched:
+- Usage block uses camelCase (`inputTokens`, etc.), not the documented
+  snake_case. `mapUsage` accepts both.
+- `tool_call` events are polymorphic containers (`tool_call.<name>ToolCall`),
+  not the documented flat shape. `extractToolCallFields` normalises both.
+- Tool results are folded into `tool_call:completed` rather than a
+  separate `tool_result` event. The legacy handler is preserved for
+  forward compat.
+- `thinking` events are emitted in `-p` mode despite the docs; consumed
+  silently.
+- `user` events echo the prompt; consumed silently.
+
+Known follow-ups (out of scope here): the live binary emits assistant
+text as a sequence of partial `assistant` events followed by a "full
+text" assistant event — the mapper currently only tracks
+`lastTextContent` for the final message and emits no TUI streaming
+events. Plan #02 (fake-CLI shim) should pick this up.
 
 ## Sequence
 This is **step 1 of 6** in the cursor-cli roadmap that lives on

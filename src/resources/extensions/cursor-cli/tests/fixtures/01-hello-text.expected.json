@@ -1,0 +1,31 @@
+{
+  "model": "composer-2",
+  "events": [],
+  "final": {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "hello fixture"
+      }
+    ],
+    "api": "cursor-stream-json",
+    "provider": "cursor-agent",
+    "model": "composer-2",
+    "usage": {
+      "input": 26433,
+      "output": 43,
+      "cacheRead": 2560,
+      "cacheWrite": 0,
+      "totalTokens": 26476,
+      "cost": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "total": 0
+      }
+    },
+    "stopReason": "stop"
+  }
+}

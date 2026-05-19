@@ -33,14 +33,25 @@ export const ZERO_USAGE: Usage = {
 	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
 
-/** Convert Cursor's `result.usage` into GSD's `Usage` shape (no dollar cost). */
+/**
+ * Convert Cursor's `result.usage` into GSD's `Usage` shape (no dollar cost).
+ *
+ * Accepts both the documented snake_case shape and the live binary's
+ * camelCase shape — see {@link CursorUsage}. Cache token counts are
+ * preserved when present so the TUI footer can reflect them once GSD's
+ * `Usage.cacheRead` / `cacheWrite` are surfaced.
+ */
 export function mapUsage(usage: CursorUsage): Usage {
+	const input = usage.inputTokens ?? usage.input_tokens ?? 0;
+	const output = usage.outputTokens ?? usage.output_tokens ?? 0;
+	const cacheRead = usage.cacheReadTokens ?? usage.cache_read_tokens ?? 0;
+	const cacheWrite = usage.cacheWriteTokens ?? usage.cache_write_tokens ?? 0;
 	return {
-		input: usage.input_tokens,
-		output: usage.output_tokens,
-		cacheRead: 0,
-		cacheWrite: 0,
-		totalTokens: usage.input_tokens + usage.output_tokens,
+		input,
+		output,
+		cacheRead,
+		cacheWrite,
+		totalTokens: input + output,
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 	};
 }

@@ -1,0 +1,124 @@
+{
+  "model": "composer-2",
+  "events": [],
+  "final": {
+    "role": "assistant",
+    "content": [
+      {
+        "type": "toolCall",
+        "id": "tool_590d37ea-d9f0-42db-9d27-7b431a92f5a",
+        "name": "read",
+        "arguments": {
+          "path": "/tmp/cursor-fixture.XXXXXX/a.txt"
+        },
+        "externalResult": {
+          "content": [
+            {
+              "type": "text",
+              "text": "alpha\n"
+            }
+          ],
+          "isError": false,
+          "details": {
+            "content": "alpha\n",
+            "isEmpty": false,
+            "exceededLimit": false,
+            "totalLines": 2,
+            "fileSize": 6,
+            "path": "/tmp/cursor-fixture.XXXXXX/a.txt",
+            "readRange": {
+              "startLine": 1,
+              "endLine": 2
+            },
+            "relatedCursorRulePaths": [],
+            "relatedCursorRules": []
+          }
+        }
+      },
+      {
+        "type": "toolCall",
+        "id": "tool_a6d0c5e2-c739-47ea-a3b2-416cf9b96ac",
+        "name": "read",
+        "arguments": {
+          "path": "/tmp/cursor-fixture.XXXXXX/b.txt"
+        },
+        "externalResult": {
+          "content": [
+            {
+              "type": "text",
+              "text": "bravo\n"
+            }
+          ],
+          "isError": false,
+          "details": {
+            "content": "bravo\n",
+            "isEmpty": false,
+            "exceededLimit": false,
+            "totalLines": 2,
+            "fileSize": 6,
+            "path": "/tmp/cursor-fixture.XXXXXX/b.txt",
+            "readRange": {
+              "startLine": 1,
+              "endLine": 2
+            },
+            "relatedCursorRulePaths": [],
+            "relatedCursorRules": []
+          }
+        }
+      },
+      {
+        "type": "toolCall",
+        "id": "tool_4945a523-207b-42ab-97b7-45e6ea7401e",
+        "name": "read",
+        "arguments": {
+          "path": "/tmp/cursor-fixture.XXXXXX/c.txt"
+        },
+        "externalResult": {
+          "content": [
+            {
+              "type": "text",
+              "text": "charlie\n"
+            }
+          ],
+          "isError": false,
+          "details": {
+            "content": "charlie\n",
+            "isEmpty": false,
+            "exceededLimit": false,
+            "totalLines": 2,
+            "fileSize": 8,
+            "path": "/tmp/cursor-fixture.XXXXXX/c.txt",
+            "readRange": {
+              "startLine": 1,
+              "endLine": 2
+            },
+            "relatedCursorRulePaths": [],
+            "relatedCursorRules": []
+          }
+        }
+      },
+      {
+        "type": "text",
+        "text": "alpha bravo charlie"
+      }
+    ],
+    "api": "cursor-stream-json",
+    "provider": "cursor-agent",
+    "model": "composer-2",
+    "usage": {
+      "input": 27012,
+      "output": 550,
+      "cacheRead": 31488,
+      "cacheWrite": 0,
+      "totalTokens": 27562,
+      "cost": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "total": 0
+      }
+    },
+    "stopReason": "stop"
+  }
+}

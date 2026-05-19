@@ -1,0 +1,6 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/tmp/fixture-workspace","session_id":"sess-XXXXXXXX","model":"Composer 2","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Reply with exactly the text \"hello fixture\" and nothing else. Do not call any tools."}]},"session_id":"sess-XXXXXXXX"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hello"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":" fixture"}]},"session_id":"sess-XXXXXXXX","timestamp_ms":0}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"hello fixture"}]},"session_id":"sess-XXXXXXXX"}
+{"type":"result","subtype":"success","duration_ms":0,"duration_api_ms":0,"is_error":false,"result":"hello fixture","session_id":"sess-XXXXXXXX","request_id":"sess-XXXXXXXX","usage":{"inputTokens":26433,"outputTokens":43,"cacheReadTokens":2560,"cacheWriteTokens":0}}
