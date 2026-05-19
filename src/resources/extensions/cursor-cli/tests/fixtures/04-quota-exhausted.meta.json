@@ -1,0 +1,12 @@
+{
+  "fixture": "04-quota-exhausted",
+  "cursor_agent_version": "synthetic",
+  "model": "composer-2.5",
+  "prompt_file": null,
+  "sanitised_at": "1970-01-01T00:00:00Z",
+  "source": "hand-written from documented quota-error shape (plan #04)",
+  "raw_bytes": 0,
+  "raw_lines": 0,
+  "sanitised_bytes": 0,
+  "sanitised_lines": 3
+}

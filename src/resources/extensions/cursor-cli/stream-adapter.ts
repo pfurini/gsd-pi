@@ -34,6 +34,10 @@ import { spawn, type ChildProcess } from "node:child_process";
 import type { Readable } from "node:stream";
 import { PartialMessageBuilder, ZERO_USAGE, mapUsage, mapStopReason, toolCallFromCursorBlock } from "./partial-builder.js";
 import { parseNdjson } from "./ndjson-parser.js";
+// UPSTREAM_REVIEW:A — error classifier used to promote cursor quota errors
+// into a structured marker the GSD retry handler can consume. See
+// `quota-detect.ts` for the full investigation block.
+import { classifyCursorError, formatCursorErrorMessage } from "./quota-detect.js";
 import { redactSecrets } from "./redact.js";
 import type {
 	CursorAssistantEvent,
@@ -466,7 +470,15 @@ export function mapCursorEvent(
 				timestamp: Date.now(),
 			};
 			if (result.is_error) {
-				finalMessage.errorMessage = redactSecrets(result.result || result.subtype);
+				// UPSTREAM_REVIEW:A — classify Cursor's terminal error string and
+				// prepend a stable code (`quota_exhausted` / `rate_limited` /
+				// `auth_failed`) so the existing pi-coding-agent retry handler
+				// (`retryable-error-regex.ts` + `_classifyErrorType`) can route
+				// quota errors through `FallbackResolver` without per-vendor logic.
+				// Unknown errors keep today's raw-redacted shape (`other` branch).
+				const classification = classifyCursorError(result.result, result.subtype);
+				const redactedDetail = redactSecrets(result.result || result.subtype);
+				finalMessage.errorMessage = formatCursorErrorMessage(classification, redactedDetail);
 				return { events, final: { kind: "error", message: finalMessage } };
 			}
 			return { events, final: { kind: "done", message: finalMessage } };

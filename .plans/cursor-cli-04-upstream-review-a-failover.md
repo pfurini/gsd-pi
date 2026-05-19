@@ -1,6 +1,9 @@
 # Cursor CLI #04 — `UPSTREAM_REVIEW:A` Cross-vendor failover on Cursor quota exhaustion
 
-## Status: DRAFT — Awaiting implementation
+## Status: SHIPPED — Implementation landed on `feat/cursor-cli-full-power`
+(reduced scope — classification + regex extension; the bool gate from the
+original draft was dropped after investigation, see "Implementation notes
+(post-landing)" below)
 
 ## Sequence
 This is **step 4 of 6** in the cursor-cli roadmap and the **first
@@ -381,3 +384,178 @@ node dist/loader.js
 #             ... run a slice that will exhaust quota or replay the fixture
 #             expect rotation to next configured provider
 ```
+
+## Implementation notes (post-landing)
+
+Recorded after plan #04 shipped on `feat/cursor-cli-full-power`. Captures
+the decisions, simplifications, and surprises the original plan didn't
+pin down.
+
+### Branching
+
+Stayed on `feat/cursor-cli-full-power`. The plan's "Branch & upstream
+posture" line ("Lives on `feat/cursor-cli-full-power`") was correct; the
+acceptance-test script's `git checkout -b feat/cursor-cli-failover` was
+the stale part — re-branching off the same parent would have re-litigated
+the merge surface for #01–#03.
+
+### Posture chosen — neither A nor B, a third path
+
+Investigation found the rotation infrastructure (FallbackResolver +
+`RetryHandler._classifyErrorType` + user-configured fallback chains) is
+already in-tree and provider-agnostic. PRs #5184 / #4394 are merged. The
+gate is `RETRYABLE_ERROR_RE` (in `retryable-error-regex.ts`) — a cursor
+quota error today doesn't match the regex, so it never enters
+`handleRetryableError` at all.
+
+Given that, the plan's bool gate (`cursor.allow_cross_vendor_failover`)
+was redundant: the user's *existing* `fallback.chains` configuration is
+already the opt-in surface. If a user puts cursor-agent + claude-code
+in the same chain, they have authored cross-vendor rotation. Adding a
+second toggle just for cursor would create an asymmetric UX (no other
+provider has a per-provider gate) for a defensive posture that only
+mattered if we tried to upstream the routing change — and the chain
+config IS the same opt-in the other providers rely on.
+
+**Shipped design:**
+
+1. cursor-side classifier (`quota-detect.ts`) recognises the documented
+   quota / rate-limit / auth phrasings.
+2. cursor stream-adapter emits `errorMessage = "<code>: <redacted>"`
+   when classified, raw redacted text otherwise.
+3. `retryable-error-regex.ts` is extended with one alternation,
+   `\bquota_exhausted\b`, so the structured marker enters the existing
+   retry pipeline. Tagged `UPSTREAM_REVIEW:A`.
+4. No new bool, no `/cursor failover` subcommand, no
+   `failover-policy.ts`, no `retry-handler.ts` diff beyond the regex
+   extension.
+
+If a future maintainer wants the bool back, the audit markers make the
+re-addition mechanical.
+
+### Classifier patterns table
+
+| Code              | Wire-text triggers (regex sample)                                                    |
+|-------------------|--------------------------------------------------------------------------------------|
+| `quota_exhausted` | `quota exhausted`, `plan limit reached`, `plan quota reached`, `usage limit reached/exceeded`, `insufficient credits`, `402 ... payment\|billing` |
+| `rate_limited`    | `rate limit`, `rate-limited`, `too many requests`, `429`                             |
+| `auth_failed`     | `unauthorized`, `unauthenticated`, `401 ... auth`, `invalid api key\|token\|credential`, `not logged in` |
+| `other`           | anything else (today's raw-redacted shape, preserved unchanged)                       |
+
+Order matters in `classifyCursorError`: quota → rate-limit → auth → other.
+`\b` boundaries throughout, so `quotation` won't match `quota`. The HTTP
+402 pattern requires a billing/payment context word within the same
+sentence — a bare `402` alone is too noisy.
+
+### Files shipped
+
+- **Created**
+  - `src/resources/extensions/cursor-cli/quota-detect.ts` — pure
+    classifier + `formatCursorErrorMessage()` helper. Holds the full
+    investigation block as the file-header comment.
+  - `src/resources/extensions/cursor-cli/tests/quota-detect.test.ts` —
+    30 tests across the 4 codes, edge cases, and the formatter.
+  - `src/resources/extensions/cursor-cli/tests/fixtures/04-quota-exhausted.ndjson`
+    (synthetic; sanitised timestamps + `1970-01-01T00:00:00Z` markers).
+  - `src/resources/extensions/cursor-cli/tests/fixtures/04-quota-exhausted.meta.json`
+    (with `cursor_agent_version: "synthetic"` and `source:` line so a
+    reviewer doesn't try to recapture from a real exhausted account).
+  - `src/resources/extensions/cursor-cli/tests/fixtures/04-quota-exhausted.expected.json`
+    (seeded via `UPDATE_FIXTURE_SNAPSHOTS=1`, byte-stable on replay).
+  - `src/resources/extensions/cursor-cli/tests/upstream-review-markers.test.ts` —
+    3 tests: per-file presence, total-count floor, sanity. Splits the
+    marker literal so the test file isn't itself a false positive on
+    string-match audits.
+
+- **Modified**
+  - `src/resources/extensions/cursor-cli/stream-adapter.ts` — `result`
+    event handler now calls `classifyCursorError()` and
+    `formatCursorErrorMessage()`. Two `UPSTREAM_REVIEW:A` markers (the
+    import block and the call site). Behaviour for `code === "other"` is
+    byte-identical to pre-#04: `redactSecrets(result.result ||
+    result.subtype)`.
+  - `packages/pi-coding-agent/src/core/retryable-error-regex.ts` — one
+    alternation added, `\bquota_exhausted\b`. Single
+    `UPSTREAM_REVIEW:A` block-comment above the regex. The regex is
+    consumed by `RetryHandler.isRetryableError` (which already routes
+    quota errors via `FallbackResolver.findFallback`).
+  - `src/resources/extensions/cursor-cli/tests/integration/stream-end-to-end.test.ts` —
+    one new test ("04-quota-exhausted fixture emits structured
+    quota_exhausted marker") asserts the marker is present, the human
+    detail is appended, and the live `RETRYABLE_ERROR_RE` accepts it.
+    Imports `RETRYABLE_ERROR_RE` from `@gsd/pi-coding-agent` so the test
+    fails if either side drifts.
+
+Not shipped (vs the original draft):
+- `failover-policy.ts`
+- `/cursor failover` slash subcommand
+- retry-handler bool gate
+- `tests/failover-policy.test.ts`
+- `tests/cross-vendor-rotation.test.ts`
+
+### Test result
+
+- Unit tests: classifier 30 passing, marker audit 3 passing.
+- Integration: cursor-cli end-to-end 8 passing (was 7 pre-#04).
+- Cursor-cli total: **116 passing**.
+- `npm run verify:pr` total: **9634 passed** (baseline post-#03 9592,
+  +42 net — includes the 30 classifier + 3 marker-audit + 1 integration
+  added here, plus drift in adjacent suites since the previous run).
+  The 2 failures are the documented
+  `custom-engine-loop-integration.test.ts` flake under concurrent load;
+  10/10 in isolation; unrelated to cursor-cli.
+
+### Wire-format facts (confirmed during implementation)
+
+- `CursorResultEvent` carries both `subtype: "success" | "error"` and
+  `is_error: boolean`. The synthetic fixture sets both consistently
+  (`subtype: "error"`, `is_error: true`).
+- Usage block is camelCase in fixtures + live binary
+  (`inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`).
+  `partial-builder.ts:mapUsage` accepts the snake_case fallback so older
+  binaries don't break.
+- For a quota-failure case, no `assistant` events appear in the stream —
+  the failure surfaces straight at the `result` event after the
+  `system`/`user` echo, which is what the synthetic fixture models.
+
+### Open questions — answers found in this round
+
+1. **Phrasing catalogue.** Pattern set covers the documented phrasings
+   plus the live wire shape inferred from `result.is_error` examples.
+   Real-world capture remains a follow-up — when a user exhausts a
+   Cursor plan in the wild, add the captured `result` string to
+   `QUOTA_PATTERNS` (and a fixture/test for it).
+2. **Cooldown.** Out of scope here. `AuthStorage.markProviderExhausted`
+   (called from `FallbackResolver.findFallback`) already handles
+   provider-level cooldown at the existing infrastructure level.
+3. **Telemetry.** Out of scope here. The classifier emits no
+   side-effects; the structured code rides on the existing
+   `AssistantMessage.errorMessage` channel; whatever GSD's local-only
+   telemetry policy is for that field applies unchanged.
+
+### Gotchas encountered
+
+- `packages/pi-coding-agent` has its OWN compiled `dist/`. After editing
+  `retryable-error-regex.ts` you must rebuild the package
+  (`cd packages/pi-coding-agent && npm run build`) before
+  `npm run test:compile` produces a `dist-test/` that consumes the new
+  regex. `verify:pr` does this for you, but a one-off
+  `node --import ./scripts/dist-test-resolve.mjs ...` run will silently
+  use the stale regex.
+- `RETRYABLE_ERROR_RE` is exported from `@gsd/pi-coding-agent`'s root
+  barrel (`packages/pi-coding-agent/src/index.ts:191`). Deep-import
+  paths into `dist/core/...` work at runtime but fail TypeScript module
+  resolution. The integration test imports from the root barrel; the
+  TypeScript diagnostic surfaces immediately if you forget.
+- The `\brate\s*limit(?:ed|ing)?\b` form in the rate-limit pattern set
+  does NOT match `"rate-limited"` — the hyphen sits between the two `\b`
+  boundaries and `\s*` is space-only. Use `[\s-]*` instead. Pinned by a
+  unit test.
+- The marker-audit test file itself must contain the literal token, but
+  must not double-count as a planning artefact. The shipped test
+  constructs the marker by concatenation (`UPSTREAM_${"REVIEW"}:A`) so
+  the source contains the literal token in every actual code line that
+  cares (file-header comment + self-reference), but the variable-bound
+  literal used in the assertions cannot accidentally be matched by a
+  naive string scan of *this* line. Listed explicitly in
+  `EXPECTED_FILES`.

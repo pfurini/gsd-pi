@@ -7,6 +7,7 @@ import type { CustomMessage } from "@gsd/pi-coding-agent/core/messages.js";
 import { readFileSync } from "node:fs";
 import { stripFrontmatter } from "@gsd/pi-coding-agent/utils/frontmatter.js";
 import { sleep } from "@gsd/pi-coding-agent/utils/sleep.js";
+import { RETRYABLE_ERROR_RE } from "@gsd/pi-coding-agent/core/retryable-error-regex.js";
 import type { PromptOptions } from "./agent-session-types.js";
 import type { AgentSessionHost } from "./agent-session-host.js";
 
@@ -482,10 +483,9 @@ export class AgentSessionPromptModule {
 		if (isContextOverflow(message, contextWindow)) return false;
 
 		const err = message.errorMessage;
-		// Match: overloaded_error, provider returned error, rate limit, 429, 500, 502, 503, 504, service unavailable, network/connection errors (including connection lost), WebSocket transport closes/errors, fetch failed, premature stream endings, HTTP/2 closed before response, terminated, retry delay exceeded
-		return /overloaded|provider.?returned.?error|rate.?limit|too many requests|429|500|502|503|504|service.?unavailable|server.?error|internal.?error|network.?error|connection.?error|connection.?refused|connection.?lost|websocket.?closed|websocket.?error|other side closed|fetch failed|upstream.?connect|reset before headers|socket hang up|ended without|stream ended before message_stop|http2 request did not get a response|timed? out|timeout|terminated|retry delay/i.test(
-			err,
-		);
+		// Retryable provider/transport errors live in a shared module so the live
+		// gate and tests consume the same pattern (see retryable-error-regex.ts).
+		return RETRYABLE_ERROR_RE.test(err);
 	}
 
 	async prepareRetry(message: AssistantMessage): Promise<boolean> {

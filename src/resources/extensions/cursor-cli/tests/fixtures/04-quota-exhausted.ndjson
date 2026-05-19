@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","apiKeySource":"login","cwd":"/tmp/fixture-workspace","session_id":"sess-XXXXXXXX","model":"Composer 2.5","permissionMode":"default"}
+{"type":"user","message":{"role":"user","content":[{"type":"text","text":"Summarise the README."}]},"session_id":"sess-XXXXXXXX"}
+{"type":"result","subtype":"error","duration_ms":0,"duration_api_ms":0,"is_error":true,"result":"quota exhausted — plan limit reached","session_id":"sess-XXXXXXXX","request_id":"sess-XXXXXXXX","usage":{"inputTokens":0,"outputTokens":0,"cacheReadTokens":0,"cacheWriteTokens":0}}

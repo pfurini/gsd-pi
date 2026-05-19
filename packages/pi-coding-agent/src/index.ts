@@ -263,6 +263,7 @@ export {
 
 // GSD-specific exports (protected during upstream vendoring)
 export { FallbackResolver } from "./core/fallback-resolver.js";
+export { RETRYABLE_ERROR_RE } from "./core/retryable-error-regex.js";
 export {
 	prepareLifecycleHooks,
 	runLifecycleHooks,

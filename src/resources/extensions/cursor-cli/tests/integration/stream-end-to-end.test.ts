@@ -25,6 +25,10 @@ import {
 	type ExternalToolResultPayload,
 } from "../../stream-adapter.ts";
 import { clearReadinessCache } from "../../readiness.ts";
+// UPSTREAM_REVIEW:A — pull the live retryable-error regex into the test so the
+// assertion fails loudly if a future refactor drops the `quota_exhausted`
+// token without updating the cursor classifier (and vice versa).
+import { RETRYABLE_ERROR_RE } from "@gsd/pi-coding-agent";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FAKE = join(HERE, "fake-cursor-agent.mjs");
@@ -233,5 +237,31 @@ describe("streamViaCursorCli end-to-end", () => {
 
 		const argv = JSON.parse(readFileSync(echoFile, "utf8")) as string[];
 		assert.ok(argv.includes("--force"), "--force must be present when allowsWrites=true");
+	});
+
+	// UPSTREAM_REVIEW:A — exercises the cursor-side classifier end-to-end and
+	// proves the structured marker enters the existing retry pipeline.
+	test("04-quota-exhausted fixture emits structured quota_exhausted marker", async () => {
+		process.env.CURSOR_FAKE_FIXTURE = join(FIXTURES, "04-quota-exhausted.ndjson");
+
+		const stream = streamViaCursorCli(mockModel(), mockContext());
+		const final = await stream.result();
+
+		assert.equal(final.stopReason, "error", "stopReason should be error");
+		const errorMessage = final.errorMessage ?? "";
+		assert.match(
+			errorMessage,
+			/^quota_exhausted: /,
+			"errorMessage should start with the structured quota marker",
+		);
+		assert.match(
+			errorMessage,
+			/plan limit reached/,
+			"redacted detail should be appended after the marker",
+		);
+		assert.ok(
+			RETRYABLE_ERROR_RE.test(errorMessage),
+			"errorMessage must match RETRYABLE_ERROR_RE so the GSD retry handler accepts it",
+		);
 	});
 });
