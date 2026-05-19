@@ -38,6 +38,10 @@ import { parseNdjson } from "./ndjson-parser.js";
 // into a structured marker the GSD retry handler can consume. See
 // `quota-detect.ts` for the full investigation block.
 import { classifyCursorError, formatCursorErrorMessage } from "./quota-detect.js";
+// UPSTREAM_REVIEW:B — local-only slice metrics for `/cursor doctor`. The
+// `record()` call is wrapped in try/catch at the resolution hook below so a
+// recorder bug can never escape and break the stream.
+import { record as recordMetric, type MetricEntry } from "./metrics.js";
 import { redactSecrets } from "./redact.js";
 import type {
 	CursorAssistantEvent,
@@ -693,8 +697,81 @@ export function streamViaCursorCli(
 	options?: SimpleStreamOptions,
 ): AssistantMessageEventStream {
 	const stream = createAssistantStream();
+	// UPSTREAM_REVIEW:B — `startedAt` is captured here (before the spawn inside
+	// `pumpCursorMessages`) so the recorded latency reflects the user-visible
+	// wall clock, including any readiness-cache probe inside the pump.
+	const startedAt = Date.now();
 	void pumpCursorMessages(model, context, options, stream);
+	// UPSTREAM_REVIEW:B — single recording site per stream. `result()` resolves
+	// with the final `AssistantMessage` for both `done` and `error` push
+	// events, so we get one record per stream regardless of which exit path
+	// the pump took. The try/catch makes recorder failures invisible to the
+	// stream consumer.
+	void stream.result().then(
+		(message) => {
+			try {
+				recordMetric(deriveMetricEntry(message, startedAt, model.id));
+			} catch {
+				// Swallow — see comment above.
+			}
+		},
+		() => {
+			// The EventStream resolves rather than rejects on terminal `error`
+			// pushes (the error message is the resolved value), so this branch
+			// fires only on a truly unexpected promise rejection. Record an
+			// error with no token info; we have no message to derive from.
+			try {
+				recordMetric({
+					startedAt,
+					finishedAt: Date.now(),
+					model: model.id,
+					outcome: "error",
+					inputTokens: 0,
+					outputTokens: 0,
+				});
+			} catch {
+				// Swallow.
+			}
+		},
+	);
 	return stream;
+}
+
+// UPSTREAM_REVIEW:B
+function deriveMetricEntry(
+	message: AssistantMessage,
+	startedAt: number,
+	modelId: string,
+): MetricEntry {
+	const outcome: MetricEntry["outcome"] =
+		message.stopReason === "stop"
+			? "success"
+			: message.stopReason === "aborted"
+				? "aborted"
+				: "error";
+	const entry: MetricEntry = {
+		startedAt,
+		finishedAt: Date.now(),
+		model: modelId,
+		outcome,
+		inputTokens: message.usage?.input ?? 0,
+		outputTokens: message.usage?.output ?? 0,
+	};
+	if (outcome === "error") {
+		const code = extractErrorCode(message.errorMessage);
+		if (code) entry.errorCode = code;
+	}
+	return entry;
+}
+
+// UPSTREAM_REVIEW:B — pull the `<code>:` prefix written by
+// `formatCursorErrorMessage` (see quota-detect.ts). Anything that doesn't
+// match the prefix shape leaves `errorCode` undefined, which the snapshot
+// renders as the literal string `"other"` when surfaced as `lastError`.
+function extractErrorCode(errorMessage: string | undefined): string | undefined {
+	if (!errorMessage) return undefined;
+	const match = /^([a-z][a-z0-9_]*):\s/.exec(errorMessage);
+	return match ? match[1] : undefined;
 }
 
 async function pumpCursorMessages(

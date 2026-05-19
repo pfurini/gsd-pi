@@ -29,6 +29,11 @@ import { clearReadinessCache } from "../../readiness.ts";
 // assertion fails loudly if a future refactor drops the `quota_exhausted`
 // token without updating the cursor classifier (and vice versa).
 import { RETRYABLE_ERROR_RE } from "@gsd/pi-coding-agent";
+// UPSTREAM_REVIEW:B — drive the recording hook end-to-end. The test asserts
+// that one full fixture run produces exactly one entry in the metrics ring,
+// proving the hook actually fires off the live `EventStream.result()`
+// resolution path.
+import { snapshot as metricsSnapshot, reset as resetMetrics } from "../../metrics.ts";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FAKE = join(HERE, "fake-cursor-agent.mjs");
@@ -103,6 +108,9 @@ after(() => {
 
 beforeEach(() => {
 	clearReadinessCache();
+	// UPSTREAM_REVIEW:B — reset the local-metrics ring per test so the
+	// `record()` hook's effects don't bleed across cases.
+	resetMetrics();
 	delete process.env.CURSOR_FAKE_FIXTURE;
 	delete process.env.CURSOR_FAKE_EXIT_CODE;
 	delete process.env.CURSOR_FAKE_STDERR;
@@ -262,6 +270,28 @@ describe("streamViaCursorCli end-to-end", () => {
 		assert.ok(
 			RETRYABLE_ERROR_RE.test(errorMessage),
 			"errorMessage must match RETRYABLE_ERROR_RE so the GSD retry handler accepts it",
+		);
+	});
+
+	// UPSTREAM_REVIEW:B — end-to-end proof that the recording hook fires off
+	// the live EventStream.result() resolution path. If the hook is removed or
+	// silently broken, this test catches it.
+	test("metrics ring records one success entry after a happy-path fixture run", async () => {
+		process.env.CURSOR_FAKE_FIXTURE = join(FIXTURES, "01-hello-text.ndjson");
+
+		const stream = streamViaCursorCli(mockModel(), mockContext());
+		await stream.result();
+		// The recording hook is `.then`'d off the same `stream.result()`
+		// promise the test awaited. Yield once to let the second microtask
+		// run before snapshotting.
+		await new Promise((r) => setImmediate(r));
+
+		const snap = metricsSnapshot();
+		assert.equal(snap.sampleCount, 1, "expected exactly one recorded entry");
+		assert.equal(snap.successRate, 1, "happy-path fixture should record as success");
+		assert.ok(
+			snap.totalInputTokens > 0,
+			"token totals should reflect the fixture's usage block",
 		);
 	});
 });

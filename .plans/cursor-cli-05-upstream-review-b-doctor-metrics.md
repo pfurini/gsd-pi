@@ -1,6 +1,6 @@
 # Cursor CLI #05 — `/cursor doctor` local metrics
 
-## Status: DRAFT — Awaiting implementation
+## Status: SHIPPED — see "Implementation notes (post-landing)" at the bottom.
 
 ## Sequence
 
@@ -269,3 +269,58 @@ node dist/loader.js
 # inside GSD: /cursor doctor
 # Expect a populated table.
 ```
+
+## Implementation notes (post-landing)
+
+Files shipped:
+
+- **Created**
+  - `src/resources/extensions/cursor-cli/metrics.ts` — ring buffer, snapshot,
+    branded type, env opt-out, hard cap.
+  - `src/resources/extensions/cursor-cli/doctor.ts` — pure ASCII renderer.
+  - `src/resources/extensions/cursor-cli/tests/metrics.test.ts` (16 tests).
+  - `src/resources/extensions/cursor-cli/tests/doctor-render.test.ts` (5 tests).
+  - `src/resources/extensions/cursor-cli/tests/telemetry-leak-guard.test.ts`
+    (2 tests).
+- **Modified**
+  - `src/resources/extensions/cursor-cli/stream-adapter.ts` — `startedAt`
+    captured in `streamViaCursorCli`; single `record()` hook off
+    `stream.result()` resolution, wrapped in `try/catch`. New helpers
+    `deriveMetricEntry` and `extractErrorCode`.
+  - `src/resources/extensions/cursor-cli/auth-cli-helper.ts` — `handleDoctor`
+    + `case "doctor"`; unknown-subcommand string and command description
+    updated.
+  - `src/resources/extensions/cursor-cli/tests/upstream-review-markers.test.ts`
+    — refactored to letter-keyed pairs; added `EXPECTED_FILES_B` and
+    `EXPECTED_MIN_TOTAL_B = 30` (actual count = 38 at landing).
+  - `src/resources/extensions/cursor-cli/tests/integration/stream-end-to-end.test.ts`
+    — `resetMetrics()` in `beforeEach`; new test asserts
+    `snapshot().sampleCount === 1` after `01-hello-text.ndjson` runs.
+
+Test counts:
+
+- New unit tests: 16 (metrics) + 5 (doctor) + 2 (leak guard) = 23.
+- Marker audit: 6 tests total (3 × :A, 3 × :B); the :A floor stayed at 9
+  (actual = 11), the :B floor was set to 30 (actual = 38).
+- Integration: +1 test (metrics record assertion).
+- Full cursor-cli suite: 143 tests pass.
+- `npm run verify:pr`: 9669 passing, 9 skipped, plus the known
+  `custom-engine-loop-integration.test.ts` flake that passes 10/10 in isolation.
+
+Deviations from the spec:
+
+- `RING_SIZE` was switched from `const` to `let` so the hard-cap assertion
+  test could exercise the throw path via two new test-only exports
+  (`__setRingSizeForTests`, `__resetRingSizeForTests`). RING_HARD_MAX stayed
+  `const`. No production code path can mutate RING_SIZE.
+- `telemetry-leak-guard.test.ts`'s `importsMetrics()` heuristic was tightened
+  during implementation: an early run flagged five gsd extension files that
+  import their own local `./metrics.js` (different module). The final
+  heuristic only treats `cursor-cli/metrics` imports — or relative imports
+  from inside `cursor-cli/` — as hits. The header comment documents the
+  remaining transitive-reach blind spot.
+- The error-code regex in `extractErrorCode()` requires a lowercase
+  `[a-z][a-z0-9_]*` prefix followed by `:\s`. This matches the
+  `quota_exhausted:` / `rate_limited:` / `auth_failed:` shapes from plan
+  #04's `formatCursorErrorMessage` and rejects accidental colon-prefixed
+  free text.

@@ -11,6 +11,11 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@gsd/pi-coding-agent";
 import { spawn } from "node:child_process";
 import { describeAllowsWrites, resolveAllowsWrites } from "./allows-writes.js";
+// UPSTREAM_REVIEW:B — `/cursor doctor` renders a local-only ASCII snapshot of
+// recent slice metrics. Imports kept narrow so the telemetry-leak guard test
+// can't find a reachable path from `metrics.ts` into any telemetry sink.
+import { renderDoctor } from "./doctor.js";
+import { snapshot as metricsSnapshot } from "./metrics.js";
 import { redactSecrets } from "./redact.js";
 import { clearReadinessCache, findWorkingCommand } from "./readiness.js";
 import { parseListModelsOutput } from "./models.js";
@@ -130,6 +135,14 @@ async function handleModels(_args: string, ctx: ExtensionCommandContext): Promis
 	logToContext(ctx, models.join("\n"));
 }
 
+// UPSTREAM_REVIEW:B — `/cursor doctor` handler. Pure snapshot read; no
+// network, no filesystem, no telemetry. Recording is gated by
+// `GSD_CURSOR_METRICS_DISABLE=1` inside `metrics.record()` itself.
+async function handleDoctor(_args: string, ctx: ExtensionCommandContext): Promise<void> {
+	const rendered = renderDoctor(metricsSnapshot());
+	logToContext(ctx, rendered);
+}
+
 async function handleResume(args: string, ctx: ExtensionCommandContext): Promise<void> {
 	const sessionId = args.trim();
 	if (!sessionId) {
@@ -169,14 +182,23 @@ async function handleRoot(
 		case "status":
 			await handleStatus(rest, ctx, pi);
 			return;
+		// UPSTREAM_REVIEW:B — `doctor` prints the local-only metrics snapshot.
+		case "doctor":
+			await handleDoctor(rest, ctx);
+			return;
 		default:
-			logToContext(ctx, `unknown subcommand: ${sub}. Try: status | login | logout | models | resume <id>`);
+			logToContext(
+				ctx,
+				`unknown subcommand: ${sub}. Try: status | login | logout | models | resume <id> | doctor`,
+			);
 	}
 }
 
 export function registerCursorCommands(pi: ExtensionAPI): void {
+	// UPSTREAM_REVIEW:B — `doctor` added to the subcommand list.
 	pi.registerCommand("cursor", {
-		description: "Manage the Cursor CLI provider (status / login / logout / models / resume)",
+		description:
+			"Manage the Cursor CLI provider (status / login / logout / models / resume / doctor)",
 		handler: (args, ctx) => handleRoot(args, ctx, pi),
 	});
 }
