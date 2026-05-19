@@ -203,6 +203,35 @@ function debugLog(...parts: unknown[]): void {
 	}
 }
 
+/**
+ * Module-level latch so the destructive-write banner fires at most once per
+ * process. Headless runs stay silent so verification pipelines don't pollute
+ * stderr; interactive runs get a single warning the first time a slice
+ * actually escalates to `--force`. Mirrors the
+ * `[claude-code-cli] Headless mode detected…` banner pattern.
+ */
+let hasWarnedAboutForce = false;
+
+/** Reset the warning latch — test-only helper. */
+export function resetForceWarningLatch(): void {
+	hasWarnedAboutForce = false;
+}
+
+/** Read the warning latch — test-only helper. */
+export function hasWarnedAboutForceForTests(): boolean {
+	return hasWarnedAboutForce;
+}
+
+function maybeWarnAboutForce(): void {
+	if (hasWarnedAboutForce) return;
+	if (process.env.GSD_HEADLESS === "1") return;
+	hasWarnedAboutForce = true;
+	process.stderr.write(
+		"[cursor-cli] --force enabled: cursor-agent may now edit files autonomously this session. " +
+			"Set GSD_CURSOR_FORCE_ALL_SLICES=0 or restart without --cursor-force to revert.\n",
+	);
+}
+
 // ─── Error helpers ────────────────────────────────────────────────────────
 
 function makeErrorMessage(model: string, errorMsg: string): AssistantMessage {
@@ -681,8 +710,13 @@ async function pumpCursorMessages(
 		}
 
 		const cwd = resolveCwd(options);
-		const args = buildCursorArgs(model, cwd, options as CursorStreamOptions | undefined);
+		const cursorOptions = options as CursorStreamOptions | undefined;
+		const args = buildCursorArgs(model, cwd, cursorOptions);
 		const prompt = buildPromptFromContext(context);
+
+		if (cursorOptions?.allowsWrites === true) {
+			maybeWarnAboutForce();
+		}
 
 		debugLog("spawning", command, args.join(" "));
 
