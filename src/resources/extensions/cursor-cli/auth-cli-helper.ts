@@ -10,6 +10,7 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@gsd/pi-coding-agent";
 import { spawn } from "node:child_process";
+import { describeAllowsWrites, resolveAllowsWrites } from "./allows-writes.js";
 import { redactSecrets } from "./redact.js";
 import { clearReadinessCache, findWorkingCommand } from "./readiness.js";
 import { parseListModelsOutput } from "./models.js";
@@ -61,7 +62,11 @@ function resolveCwd(ctx: ExtensionCommandContext): string {
 	return typeof candidate === "string" && candidate.length > 0 ? candidate : process.cwd();
 }
 
-async function handleStatus(_args: string, ctx: ExtensionCommandContext): Promise<void> {
+async function handleStatus(
+	_args: string,
+	ctx: ExtensionCommandContext,
+	pi: ExtensionAPI | undefined,
+): Promise<void> {
 	const command = findWorkingCommand();
 	if (!command) {
 		logToContext(ctx, "cursor-agent not detected on PATH");
@@ -70,6 +75,11 @@ async function handleStatus(_args: string, ctx: ExtensionCommandContext): Promis
 	const cwd = resolveCwd(ctx);
 	const versionResult = await shellOut(command, ["--version"], cwd);
 	const statusResult = await shellOut(command, ["status"], cwd);
+	// `/cursor status` is a session-level check — there is no slice in
+	// scope, so the resolver only considers env + flag and reports the
+	// remaining default ("write-protected"). This is what the user sees
+	// before they run anything.
+	const writePolicy = resolveAllowsWrites(pi ? (name) => pi.getFlag(name) : undefined, undefined);
 	logToContext(
 		ctx,
 		[
@@ -77,6 +87,7 @@ async function handleStatus(_args: string, ctx: ExtensionCommandContext): Promis
 			`version: ${versionResult.stdout.trim() || "unknown"}`,
 			`status: ${statusResult.stdout.trim() || statusResult.stderr.trim() || "unknown"}`,
 			`CURSOR_API_KEY: ${process.env.CURSOR_API_KEY ? "present" : "not set"}`,
+			`write policy: ${describeAllowsWrites(writePolicy)}`,
 		].join("\n"),
 	);
 }
@@ -131,10 +142,14 @@ async function handleResume(args: string, ctx: ExtensionCommandContext): Promise
 	);
 }
 
-async function handleRoot(args: string, ctx: ExtensionCommandContext): Promise<void> {
+async function handleRoot(
+	args: string,
+	ctx: ExtensionCommandContext,
+	pi: ExtensionAPI,
+): Promise<void> {
 	const sub = args.split(/\s+/).filter(Boolean)[0];
 	if (!sub) {
-		await handleStatus("", ctx);
+		await handleStatus("", ctx, pi);
 		return;
 	}
 	const rest = args.slice(sub.length).trim();
@@ -152,7 +167,7 @@ async function handleRoot(args: string, ctx: ExtensionCommandContext): Promise<v
 			await handleResume(rest, ctx);
 			return;
 		case "status":
-			await handleStatus(rest, ctx);
+			await handleStatus(rest, ctx, pi);
 			return;
 		default:
 			logToContext(ctx, `unknown subcommand: ${sub}. Try: status | login | logout | models | resume <id>`);
@@ -162,6 +177,6 @@ async function handleRoot(args: string, ctx: ExtensionCommandContext): Promise<v
 export function registerCursorCommands(pi: ExtensionAPI): void {
 	pi.registerCommand("cursor", {
 		description: "Manage the Cursor CLI provider (status / login / logout / models / resume)",
-		handler: handleRoot,
+		handler: (args, ctx) => handleRoot(args, ctx, pi),
 	});
 }
