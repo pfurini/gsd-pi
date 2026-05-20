@@ -28,7 +28,9 @@
  *   - `run.stream()` → `AsyncGenerator<SDKMessage, void>`
  *   - `run.wait()` → `Promise<RunResult>`  (status / result / durationMs)
  *   - `run.cancel()` → `Promise<void>`
- *   - apiKey defaults to `process.env.CURSOR_API_KEY` when omitted.
+ *   - `apiKey` MUST be passed explicitly to `Agent.create` — v1.0.13 does
+ *     NOT auto-read `process.env.CURSOR_API_KEY` (verified 2026-05-20; see
+ *     the compliance note in `sdk-adapter.ts`).
  */
 
 import { createRequire } from "node:module";
@@ -106,6 +108,127 @@ function warnOnce(err: unknown): void {
 	process.stderr.write(
 		`[cursor-cli] @cursor/sdk load failed (${redactSecrets(detail)}); falling back to CLI path.\n`,
 	);
+}
+
+// ─── Background-rejection guard ───────────────────────────────────────────
+
+// UPSTREAM_REVIEW:C — @cursor/sdk surfaces auth / transport failures from
+// detached background Connect-RPC tasks as *unhandled* promise rejections
+// that no try/catch inside `pumpViaSdk` can intercept (verified 2026-05-20:
+// a present-but-invalid CURSOR_API_KEY produces an `unauthenticated`
+// ConnectError this way). The pump's own `run.wait()` drain still yields a
+// clean error terminal, so the extra rejection is redundant — but in a GSD
+// host it trips `_gsdRejectionGuard` (gsd/bootstrap/register-extension.ts),
+// which calls `process.exit(1)` and kills the whole CLI.
+//
+// We cannot attach `.catch` to a promise we never receive a handle to, and a
+// time-scoped listener loses the race (the SDK can reject *after*
+// `run.wait()` has already resolved). So the guard is installed once,
+// lazily, on the first SDK pump and lives for the process: it takes over the
+// `unhandledRejection` channel, swallows Cursor-SDK-identifiable rejections
+// (with one redacted stderr line), and faithfully forwards every other
+// rejection to the host listeners it replaced — so unrelated bugs still
+// crash exactly as before. Ordering assumption: the host installs its crash
+// guard at bootstrap, before any slice runs; re-running `installEpipeGuard`
+// after this takeover would re-add `_gsdRejectionGuard` and is not expected.
+
+type RejectionListener = (reason: unknown, promise: Promise<unknown>) => void;
+
+let rejectionGuardInstalled = false;
+let inheritedRejectionListeners: RejectionListener[] = [];
+let installedRejectionGuard: RejectionListener | undefined;
+let absorbedRejectionWarned = false;
+
+// UPSTREAM_REVIEW:C — lazy, idempotent. Called at the head of every SDK pump.
+export function installSdkRejectionGuard(): void {
+	if (rejectionGuardInstalled) return;
+	rejectionGuardInstalled = true;
+
+	inheritedRejectionListeners = process.listeners(
+		"unhandledRejection",
+	) as RejectionListener[];
+	for (const listener of inheritedRejectionListeners) {
+		process.removeListener("unhandledRejection", listener);
+	}
+
+	installedRejectionGuard = (reason: unknown, promise: Promise<unknown>): void => {
+		if (looksLikeCursorSdkError(reason)) {
+			if (!absorbedRejectionWarned) {
+				absorbedRejectionWarned = true;
+				const detail = reason instanceof Error ? reason.message : String(reason);
+				process.stderr.write(
+					"[cursor-cli] absorbed a background @cursor/sdk rejection " +
+						`(${redactSecrets(detail)}); the slice fails gracefully — ` +
+						"verify CURSOR_API_KEY is valid.\n",
+				);
+			}
+			return;
+		}
+		// Not a Cursor-SDK rejection — preserve host behaviour exactly.
+		if (inheritedRejectionListeners.length === 0) {
+			// No host crash guard (bare / test runtime): restore Node's default
+			// "throw on unhandled rejection" so genuine bugs still surface.
+			queueMicrotask(() => {
+				throw reason;
+			});
+			return;
+		}
+		for (const listener of inheritedRejectionListeners) {
+			listener(reason, promise);
+		}
+	};
+	process.on("unhandledRejection", installedRejectionGuard);
+}
+
+// UPSTREAM_REVIEW:C — duck-type a rejection as originating from @cursor/sdk or
+// its Connect-RPC transport. Walks the `cause` chain since the SDK wraps the
+// underlying AuthenticationError inside a ConnectError.
+function looksLikeCursorSdkError(reason: unknown): boolean {
+	let current: unknown = reason;
+	for (let depth = 0; depth < 6 && current; depth++) {
+		if (typeof current !== "object") break;
+		const err = current as {
+			name?: unknown;
+			code?: unknown;
+			stack?: unknown;
+			cause?: unknown;
+			constructor?: { name?: unknown };
+		};
+		const name = String(err.name ?? err.constructor?.name ?? "");
+		if (
+			/ConnectError|CursorAgentError|CursorSdkError|AuthenticationError|RateLimitError|NetworkError|ConfigurationError/.test(
+				name,
+			)
+		) {
+			return true;
+		}
+		if (
+			typeof err.code === "string" &&
+			/^(unauthenticated|unauthorized|permission_denied)$/.test(err.code)
+		) {
+			return true;
+		}
+		if (typeof err.stack === "string" && /[/@](cursor[/-]sdk|connectrpc)/.test(err.stack)) {
+			return true;
+		}
+		current = err.cause;
+	}
+	return false;
+}
+
+// UPSTREAM_REVIEW:C — test hook: undo the takeover so a suite can exercise the
+// install path in isolation. Restores the inherited listeners verbatim.
+export function __resetRejectionGuardForTests(): void {
+	if (installedRejectionGuard) {
+		process.removeListener("unhandledRejection", installedRejectionGuard);
+	}
+	for (const listener of inheritedRejectionListeners) {
+		process.on("unhandledRejection", listener);
+	}
+	rejectionGuardInstalled = false;
+	inheritedRejectionListeners = [];
+	installedRejectionGuard = undefined;
+	absorbedRejectionWarned = false;
 }
 
 // UPSTREAM_REVIEW:C — test hook. Pass a structural mock to short-circuit the

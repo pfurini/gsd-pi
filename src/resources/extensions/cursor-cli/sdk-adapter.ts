@@ -9,10 +9,15 @@
  * events; the metrics hook in `stream-dispatch.ts` records the call
  * regardless.
  *
- * Compliance posture (§"Compliance & Data Handling"): we never read
- * `CURSOR_API_KEY` into a JS variable. `Agent.create` falls back to
- * `process.env.CURSOR_API_KEY` automatically when `apiKey` is omitted, so
- * the credential never crosses our address space.
+ * Compliance posture (§"Compliance & Data Handling"): `@cursor/sdk` v1.0.13
+ * does NOT auto-read `process.env.CURSOR_API_KEY` — verified 2026-05-20 via
+ * live smoke: omitting `apiKey` lets `Agent.create` resolve, but the run
+ * then fails with an `unauthenticated` Connect-RPC rejection thrown from a
+ * detached background task. The key is therefore passed to `Agent.create`
+ * as the inline `process.env.CURSOR_API_KEY` argument expression — never
+ * assigned to a named variable, never logged, never persisted — so it is
+ * not retained in our address space beyond the call, and `redactSecrets`
+ * still covers every error string we emit.
  *
  * Cursor harness passthrough: GSD does NOT register MCP servers, Skills,
  * Hooks, or Subagents through the SDK on the user's behalf. Whatever the
@@ -45,6 +50,7 @@ import type {
 	SdkThinkingMessage,
 	SdkToolUseMessage,
 } from "./sdk-types.js";
+import { installSdkRejectionGuard } from "./sdk-runtime.js";
 import { buildPromptFromContext } from "./stream-adapter.js";
 import { makeErrorMessage, makeInitialState, mapCursorEvent } from "./stream-translation.js";
 
@@ -67,6 +73,11 @@ export async function pumpViaSdk(
 	options: SdkPumpOptions | undefined,
 	stream: AssistantMessageEventStream,
 ): Promise<void> {
+	// UPSTREAM_REVIEW:C — install once: absorb @cursor/sdk's detached
+	// background rejections (e.g. an `unauthenticated` ConnectError from a
+	// present-but-invalid CURSOR_API_KEY) before they reach the host's
+	// process-exiting crash guard. See `installSdkRejectionGuard`.
+	installSdkRejectionGuard();
 	const state = makeInitialState(model.id);
 	let agent: SdkAgent | undefined;
 	let run: SdkRun | undefined;
@@ -87,9 +98,12 @@ export async function pumpViaSdk(
 		stream.push({ type: "start", partial: initialPartial });
 
 		const cwd = resolveCwd(options);
-		// `apiKey` deliberately omitted — Agent.create falls back to
-		// process.env.CURSOR_API_KEY without us ever holding the value.
+		// UPSTREAM_REVIEW:C — `apiKey` MUST be passed explicitly: @cursor/sdk
+		// v1.0.13 does not fall back to process.env.CURSOR_API_KEY on its own.
+		// Passed inline (never bound to a named variable) so the credential is
+		// not retained in our address space beyond this call.
 		agent = await sdk.Agent.create({
+			apiKey: process.env.CURSOR_API_KEY,
 			model: { id: model.id },
 			local: { cwd },
 		});
