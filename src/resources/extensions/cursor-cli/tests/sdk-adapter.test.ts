@@ -18,8 +18,8 @@ import type {
 	Context,
 	Model,
 } from "@gsd/pi-ai";
-import { pumpViaSdk, translateSdkMessage } from "../sdk-adapter.ts";
-import type { SdkMessage, SdkModule } from "../sdk-types.ts";
+import { accumulateSdkAssistantText, pumpViaSdk, translateSdkMessage } from "../sdk-adapter.ts";
+import type { CursorAssistantEvent, SdkMessage, SdkModule } from "../sdk-types.ts";
 
 function makeStream(): AssistantMessageEventStream {
 	return new EventStream<AssistantMessageEvent, AssistantMessage>(
@@ -117,6 +117,44 @@ describe("pumpViaSdk", () => {
 			| undefined;
 		assert.ok(text);
 		assert.match(text.text, /sdk-adapter-ok/);
+	});
+
+	test("accumulates @cursor/sdk assistant text deltas into the final message", async () => {
+		// @cursor/sdk emits assistant messages as incremental deltas ("P",
+		// then "ONG"); the final message must read "PONG", not the last delta.
+		// `wait.result` is a distinct value so the assertion proves the text
+		// came from the accumulated deltas, not the fallback result string.
+		const sdk = makeFakeSdk({
+			messages: [
+				{
+					type: "assistant",
+					agent_id: "agent-test",
+					run_id: "run-test",
+					message: { role: "assistant", content: [{ type: "text", text: "P" }] },
+				},
+				{
+					type: "assistant",
+					agent_id: "agent-test",
+					run_id: "run-test",
+					message: { role: "assistant", content: [{ type: "text", text: "ONG" }] },
+				},
+			],
+			wait: { status: "finished", result: "fallback-not-used" },
+		});
+
+		const stream = makeStream();
+		await pumpViaSdk(sdk, mockModel(), mockContext(), undefined, stream);
+		const final = await stream.result();
+
+		const text = final.content.find((b) => b.type === "text") as
+			| { type: "text"; text: string }
+			| undefined;
+		assert.ok(text);
+		assert.equal(
+			text.text,
+			"PONG",
+			"multi-delta assistant text must accumulate, not snapshot-replace",
+		);
 	});
 
 	test("synthesises an error final when run.wait reports status=error", async () => {
@@ -297,5 +335,39 @@ describe("translateSdkMessage", () => {
 	test("task / request messages are consumed silently", () => {
 		assert.equal(translateSdkMessage({ type: "task", agent_id: "a", run_id: "r" }).length, 0);
 		assert.equal(translateSdkMessage({ type: "request" } as SdkMessage).length, 0);
+	});
+});
+
+describe("accumulateSdkAssistantText", () => {
+	test("rewrites assistant deltas to a running cumulative total", () => {
+		const acc = { text: "" };
+		const mkDelta = (text: string): CursorAssistantEvent => ({
+			type: "assistant",
+			uuid: "run-test",
+			session_id: "run-test",
+			message: { role: "assistant", content: [{ type: "text", text }] },
+		});
+
+		const first = accumulateSdkAssistantText(mkDelta("P"), acc) as CursorAssistantEvent;
+		const second = accumulateSdkAssistantText(mkDelta("ONG"), acc) as CursorAssistantEvent;
+
+		const firstBlock = first.message.content[0];
+		const secondBlock = second.message.content[0];
+		assert.equal(firstBlock.type === "text" ? firstBlock.text : "", "P");
+		assert.equal(secondBlock.type === "text" ? secondBlock.text : "", "PONG");
+		assert.equal(acc.text, "PONG");
+	});
+
+	test("passes non-assistant events through untouched", () => {
+		const acc = { text: "seed" };
+		const events = translateSdkMessage({
+			type: "system",
+			subtype: "init",
+			agent_id: "a",
+			run_id: "r",
+			model: { id: "composer-2.5" },
+		});
+		assert.equal(accumulateSdkAssistantText(events[0], acc), events[0]);
+		assert.equal(acc.text, "seed");
 	});
 });

@@ -37,6 +37,8 @@ import type {
 import { ZERO_USAGE } from "./partial-builder.js";
 import { redactSecrets } from "./redact.js";
 import type {
+	CursorAssistantEvent,
+	CursorContentBlock,
 	CursorResultEvent,
 	CursorStreamEvent,
 	CursorToolCallEvent,
@@ -79,6 +81,9 @@ export async function pumpViaSdk(
 	// process-exiting crash guard. See `installSdkRejectionGuard`.
 	installSdkRejectionGuard();
 	const state = makeInitialState(model.id);
+	// UPSTREAM_REVIEW:C — running total for the SDK's incremental assistant
+	// text deltas (see `accumulateSdkAssistantText`).
+	const assistantAcc = { text: "" };
 	let agent: SdkAgent | undefined;
 	let run: SdkRun | undefined;
 
@@ -133,7 +138,8 @@ export async function pumpViaSdk(
 				});
 				return;
 			}
-			for (const cursorEvent of translateSdkMessage(msg)) {
+			for (const rawEvent of translateSdkMessage(msg)) {
+				const cursorEvent = accumulateSdkAssistantText(rawEvent, assistantAcc);
 				const { events, final } = mapCursorEvent(cursorEvent, state);
 				for (const e of events) stream.push(e);
 				if (final) {
@@ -259,6 +265,43 @@ export function translateSdkMessage(msg: SdkMessage): CursorStreamEvent[] {
 		default:
 			return [{ type: (msg as { type: string }).type } as CursorStreamEvent];
 	}
+}
+
+// UPSTREAM_REVIEW:C
+/**
+ * Rewrite a translated `assistant` event so its text block holds the running
+ * cumulative total rather than just the latest delta.
+ *
+ * `@cursor/sdk` emits `assistant` messages as incremental text deltas (e.g.
+ * `"P"` then `"ONG"`), but the shared `mapCursorEvent` / `ingestAssistantBlock`
+ * expects cumulative snapshots — that is the CLI wire shape, where every
+ * `assistant` event carries the full text so far. `ingestAssistantBlock` does
+ * a snapshot *replace*, so without this a multi-delta reply keeps only the
+ * last delta and silently drops every earlier chunk.
+ *
+ * `acc` is the per-pump accumulator. Non-`assistant` events pass through
+ * untouched. Non-text content blocks (none observed in SDK `assistant`
+ * messages today — tool calls arrive as separate `tool_call` messages) are
+ * preserved ahead of the accumulated text.
+ */
+export function accumulateSdkAssistantText(
+	event: CursorStreamEvent,
+	acc: { text: string },
+): CursorStreamEvent {
+	if (event.type !== "assistant") return event;
+	const asst = event as CursorAssistantEvent;
+
+	let delta = "";
+	const passthrough: CursorContentBlock[] = [];
+	for (const block of asst.message.content) {
+		if (block.type === "text") delta += block.text;
+		else passthrough.push(block);
+	}
+	if (delta === "") return event;
+
+	acc.text += delta;
+	const content: CursorContentBlock[] = [...passthrough, { type: "text", text: acc.text }];
+	return { ...asst, message: { ...asst.message, content } };
 }
 
 function translateSystem(msg: SdkSystemMessage): CursorStreamEvent {
