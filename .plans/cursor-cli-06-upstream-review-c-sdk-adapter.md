@@ -118,19 +118,48 @@ Modified:
 
 ### Follow-up TODO
 
-- **Live SDK-path smoke against a real `@cursor/sdk` install.** The
-  prompt asked for a one-shot smoke driven through the dispatcher with
-  `CURSOR_API_KEY` set. The current dev session did not have the key
-  available in env, so the smoke ran via the CLI route instead (the
-  dispatcher correctly emitted the missing-key warning and fell back).
-  In a future session: export `CURSOR_API_KEY`, run
-  `npm install --no-save @cursor/sdk`, build `dist/`, and drive a
-  small smoke harness through `streamViaCursor` with the default
-  setting. Confirm the SDK path yields `stopReason: "stop"`, that
-  `/cursor doctor` shows one extra entry, and that
-  `usage.input + usage.output === 0` (SDK Run interface doesn't
-  surface tokens). Then flip `cursor.adapter = "cli"` and confirm
-  the CLI path produces the same shape with non-zero usage.
+- ~~**Live SDK-path smoke against a real `@cursor/sdk` install.**~~
+  **DONE — 2026-05-20.** Smoke driven through `streamViaCursor` against a
+  real `@cursor/sdk@1.0.13` install with a valid `CURSOR_API_KEY`.
+
+  - **Finding A (P0 — fixed).** The SDK path crashed the host with an
+    unhandled `unauthenticated` Connect-RPC rejection. Root cause:
+    `sdk-adapter.ts` omitted `apiKey` from `Agent.create`, on the
+    assumption (deviation #1 above, and the old `sdk-runtime.ts` header)
+    that the SDK auto-reads `process.env.CURSOR_API_KEY`. **It does not**
+    in v1.0.13 — omitting `apiKey` lets `Agent.create` resolve, but the
+    run then fails and a *detached background task* throws
+    `unauthenticated`. The path-selector's `if (!CURSOR_API_KEY)` guard
+    cannot help: the key *is* present, so the guard passes and the SDK is
+    still handed nothing. **Fix:** pass `apiKey: process.env.CURSOR_API_KEY`
+    inline to `Agent.create` (never bound to a named variable — the
+    compliance note in the `sdk-adapter.ts` header was corrected to match).
+
+  - **Background-rejection guard added.** `installSdkRejectionGuard()`
+    (`sdk-runtime.ts`) — a lazy, process-lifetime takeover of the
+    `unhandledRejection` channel that absorbs Cursor-SDK-identifiable
+    rejections (so an *invalid / expired* key degrades to a clean stream
+    error instead of tripping the host's `_gsdRejectionGuard` →
+    `process.exit(1)`) and forwards every other rejection to the host
+    listeners verbatim.
+
+  - **Verified.** With the fix the SDK path runs end-to-end:
+    `stopReason: "stop"`, `/cursor doctor` +1 entry,
+    `usage.input + usage.output === 0` (the ZERO_USAGE assumption holds —
+    `run.wait()` surfaces no token counts). CLI path unchanged:
+    `stopReason: "stop"`, non-zero usage. 222/222 cursor-cli tests green.
+
+- ~~**Finding C: SDK path drops assistant text across deltas.**~~
+  **FIXED — 2026-05-20.** The SDK emits `assistant` messages as incremental
+  text deltas (`"P"` then `"ONG"`); `ingestAssistantBlock` does a
+  snapshot-*replace*, so a multi-delta reply kept only the last delta
+  (`"PONG"` → `"ONG"`) — non-deterministic, invisible when the model
+  replies in one chunk. Fix: `accumulateSdkAssistantText` (`sdk-adapter.ts`)
+  rewrites each translated `assistant` event so its text block holds the
+  running cumulative total before it reaches `mapCursorEvent`; `pumpViaSdk`
+  threads a per-run accumulator. Covered by a deterministic unit test plus a
+  multi-delta `pumpViaSdk` test, and verified live (6/6 SDK-path runs
+  returned exact `"PONG"`).
 
 
 

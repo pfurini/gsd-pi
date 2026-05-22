@@ -45,6 +45,9 @@ import {
 // CLI pump in isolation; the public `streamSimple` entry point is
 // `streamViaCursor` in `stream-dispatch.ts`, which owns the metrics hook.
 import { createAssistantStream } from "./stream-dispatch.js";
+// UPSTREAM_REVIEW:C — opt-in usage tracer (`GSD_CURSOR_USAGE_LOG`) for the
+// CLI-vs-SDK token-accounting investigation.
+import { traceUsage } from "./usage-trace.js";
 
 // Re-export shared types for back-compat with downstream callers and tests
 // that still import them from this module.
@@ -283,6 +286,10 @@ export async function pumpCursorMessages(
 		const args = buildCursorArgs(model, cwd, cursorOptions);
 		const prompt = buildPromptFromContext(context);
 
+		// UPSTREAM_REVIEW:C — usage trace: record the exact CLI invocation so a
+		// CLI run can be compared against an SDK run of the same prompt.
+		traceUsage({ path: "cli", event: "start", model: model.id, cwd, args });
+
 		if (cursorOptions?.allowsWrites === true) {
 			maybeWarnAboutForce();
 		}
@@ -342,6 +349,10 @@ export async function pumpCursorMessages(
 		});
 
 		let resolvedFinal = false;
+		// UPSTREAM_REVIEW:C — usage trace: tally event types so the CLI run's
+		// agentic depth (tool_call / assistant counts) is visible alongside
+		// the terminal `result` usage block.
+		const eventTally: Record<string, number> = {};
 		for await (const event of parseNdjson(childStdout)) {
 			if (options?.signal?.aborted) {
 				stream.push({
@@ -350,6 +361,16 @@ export async function pumpCursorMessages(
 					error: makeAbortedMessage(model.id, state.lastTextContent),
 				});
 				return;
+			}
+			// UPSTREAM_REVIEW:C — usage trace hook.
+			eventTally[event.type] = (eventTally[event.type] ?? 0) + 1;
+			if (event.type === "result") {
+				traceUsage({
+					path: "cli",
+					event: "result",
+					usage: event.usage ?? {},
+					events: { ...eventTally },
+				});
 			}
 			const { events, final } = mapCursorEvent(event, state);
 			for (const e of events) stream.push(e);

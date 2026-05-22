@@ -27,7 +27,7 @@ import {
 	writeCursorAdapterSetting,
 	type CursorAdapter,
 } from "./adapter-setting.js";
-import { invalidatePathCache } from "./path-selector.js";
+import { invalidatePathCache, pickStreamPath } from "./path-selector.js";
 
 interface ShellOutResult {
 	code: number;
@@ -63,11 +63,18 @@ async function shellOut(command: string, args: string[], cwd: string): Promise<S
 
 function logToContext(ctx: ExtensionCommandContext, message: string): void {
 	const redacted = redactSecrets(message);
-	const log = (ctx as unknown as { log?: (m: string) => void }).log;
-	if (typeof log === "function") {
-		log(redacted);
+	// In the interactive TUI (and the web UI) output MUST go through
+	// `ui.notify()`: it renders the text as a layout-tracked chat component
+	// so the renderer reflows the editor and footer around it. A raw
+	// `process.stdout.write()` bypasses the TUI layout engine entirely — the
+	// footer then redraws on top of the text, and multi-line output (e.g.
+	// `/cursor doctor`) visibly collides with the input box.
+	if (ctx.hasUI) {
+		ctx.ui.notify(redacted, "info");
 		return;
 	}
+	// Headless / print / RPC mode: there is no TUI to corrupt, so writing
+	// straight to stdout is the correct (and only) channel.
 	process.stdout.write(`${redacted}\n`);
 }
 
@@ -175,11 +182,37 @@ async function handleModels(_args: string, ctx: ExtensionCommandContext): Promis
 	logToContext(ctx, models.join("\n"));
 }
 
-// UPSTREAM_REVIEW:B — `/cursor doctor` handler. Pure snapshot read; no
-// network, no filesystem, no telemetry. Recording is gated by
-// `GSD_CURSOR_METRICS_DISABLE=1` inside `metrics.record()` itself.
+// UPSTREAM_REVIEW:C — describe the adapter the next slice will actually use.
+// `pickStreamPath()` is the single source of truth: it folds in the
+// `cursor.adapter` setting AND the runtime fallbacks (missing CURSOR_API_KEY,
+// `@cursor/sdk` failing to load). When the resolved path differs from the
+// configured setting, surfacing that gap is the whole point — `/cursor
+// status` only ever reports the configured value, never the fallback.
+async function describeResolvedAdapter(): Promise<string> {
+	const configured = readCursorAdapterSetting();
+	let resolved: CursorAdapter;
+	try {
+		const path = await pickStreamPath();
+		resolved = path.kind === "sdk" ? "sdk" : "cli";
+	} catch {
+		// pickStreamPath is defensive and shouldn't throw, but a doctor read
+		// must never fail — degrade to reporting the configured setting.
+		return `${configured} (configured; runtime path unresolved)`;
+	}
+	if (resolved === configured) {
+		return `${resolved}${resolved === DEFAULT_CURSOR_ADAPTER ? " (default)" : ""}`;
+	}
+	return `${resolved} (fell back from ${configured})`;
+}
+
+// UPSTREAM_REVIEW:B — `/cursor doctor` renders the local-only metrics
+// snapshot; recording is gated by `GSD_CURSOR_METRICS_DISABLE=1` inside
+// `metrics.record()` itself. UPSTREAM_REVIEW:C — the trailing `adapter:`
+// line reports the resolved SDK/CLI path; resolving it reads the persisted
+// `cursor.adapter` setting and may probe `@cursor/sdk` once per process.
 async function handleDoctor(_args: string, ctx: ExtensionCommandContext): Promise<void> {
-	const rendered = renderDoctor(metricsSnapshot());
+	const adapter = await describeResolvedAdapter();
+	const rendered = renderDoctor(metricsSnapshot(), adapter);
 	logToContext(ctx, rendered);
 }
 

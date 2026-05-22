@@ -4,10 +4,12 @@
  * Wraps the SDK's `Agent.create` → `agent.send` → `run.stream()` path and
  * translates each `SDKMessage` into a `CursorStreamEvent` so the shared
  * `mapCursorEvent` (from `stream-translation.ts`) can reuse the same
- * mapping table the CLI pump uses. Token usage is not surfaced by the SDK
- * Run interface today, so the SDK path reports `ZERO_USAGE` on terminal
- * events; the metrics hook in `stream-dispatch.ts` records the call
- * regardless.
+ * mapping table the CLI pump uses. Token usage is not on the SDK `Run`
+ * interface — `run.wait()`'s `RunResult` carries no usage block, nor does
+ * any `SDKMessage` in the run stream. It arrives only via the `turn-ended`
+ * interaction update on `send`'s `onDelta` callback, which this pump
+ * captures and threads into the synthesised terminal `result` event so the
+ * context meter and compaction see real numbers (parity with the CLI path).
  *
  * Compliance posture (§"Compliance & Data Handling"): `@cursor/sdk` v1.0.13
  * does NOT auto-read `process.env.CURSOR_API_KEY` — verified 2026-05-20 via
@@ -19,11 +21,14 @@
  * not retained in our address space beyond the call, and `redactSecrets`
  * still covers every error string we emit.
  *
- * Cursor harness passthrough: GSD does NOT register MCP servers, Skills,
- * Hooks, or Subagents through the SDK on the user's behalf. Whatever the
- * user has configured locally (`~/.cursor/...`) is what the slice picks
- * up. The slice runs *inside* the Cursor harness — GSD is a passthrough,
- * not a re-implementation.
+ * Cursor harness passthrough: GSD does not *programmatically* register MCP
+ * servers, Skills, Hooks, or Subagents via the SDK's `Agent.create` options.
+ * It passes `settingSources: ["project"]` so the slice picks up the
+ * workspace's on-disk rules (`.cursor/rules`, `AGENTS.md`). The `"user"`
+ * layer is intentionally NOT requested — it triggers a cross-tool
+ * agent-skill scan that loads hundreds of unrelated plugin-cache files.
+ * The slice runs *inside* the Cursor harness — GSD is a passthrough, not a
+ * re-implementation.
  */
 
 import type {
@@ -42,6 +47,7 @@ import type {
 	CursorResultEvent,
 	CursorStreamEvent,
 	CursorToolCallEvent,
+	CursorUsage,
 	SdkAgent,
 	SdkAssistantMessage,
 	SdkMessage,
@@ -53,8 +59,14 @@ import type {
 	SdkToolUseMessage,
 } from "./sdk-types.js";
 import { installSdkRejectionGuard } from "./sdk-runtime.js";
+// UPSTREAM_REVIEW:C — fences @cursor/sdk's in-process `console.*` output so
+// its settings-loader INFO lines don't overprint the interactive TUI.
+import { enterSdkConsoleScope, exitSdkConsoleScope } from "./sdk-console-guard.js";
 import { buildPromptFromContext } from "./stream-adapter.js";
 import { makeErrorMessage, makeInitialState, mapCursorEvent } from "./stream-translation.js";
+// UPSTREAM_REVIEW:C — opt-in usage tracer (`GSD_CURSOR_USAGE_LOG`) for the
+// CLI-vs-SDK token-accounting investigation.
+import { traceUsage } from "./usage-trace.js";
 
 // ─── Public pump ──────────────────────────────────────────────────────────
 
@@ -80,6 +92,10 @@ export async function pumpViaSdk(
 	// present-but-invalid CURSOR_API_KEY) before they reach the host's
 	// process-exiting crash guard. See `installSdkRejectionGuard`.
 	installSdkRejectionGuard();
+	// UPSTREAM_REVIEW:C — fence @cursor/sdk's in-process `console.*` output
+	// for the duration of this pump so its settings-loader INFO lines don't
+	// overprint the TUI. Balanced by `exitSdkConsoleScope()` in the `finally`.
+	enterSdkConsoleScope();
 	const state = makeInitialState(model.id);
 	// UPSTREAM_REVIEW:C — running total for the SDK's incremental assistant
 	// text deltas (see `accumulateSdkAssistantText`).
@@ -103,6 +119,18 @@ export async function pumpViaSdk(
 		stream.push({ type: "start", partial: initialPartial });
 
 		const cwd = resolveCwd(options);
+		// UPSTREAM_REVIEW:C — `settingSources` MUST be passed. With it unset,
+		// the SDK's setting resolver (`NV`/`DV`, verified against
+		// @cursor/sdk@1.0.13) turns every Cursor settings layer OFF, so the
+		// slice silently ignores the project's `.cursor/rules` + `AGENTS.md`.
+		// Only `"project"` is requested: it loads the workspace rules the
+		// slice actually needs. `"user"` is deliberately excluded — it makes
+		// the SDK's `AgentSkillsCursorRulesService` scan cross-tool agent-skill
+		// dirs (`~/.claude`, `~/.codex`, `~/.cursor`), which on a developer
+		// machine pulls in hundreds of plugin-cache `SKILL.md` files (~857
+		// observed) and balloons the prompt. `team` / `mdm` / `plugins` are
+		// excluded for the same reason.
+		const settingSources: string[] = ["project"];
 		// UPSTREAM_REVIEW:C — `apiKey` MUST be passed explicitly: @cursor/sdk
 		// v1.0.13 does not fall back to process.env.CURSOR_API_KEY on its own.
 		// Passed inline (never bound to a named variable) so the credential is
@@ -110,11 +138,40 @@ export async function pumpViaSdk(
 		agent = await sdk.Agent.create({
 			apiKey: process.env.CURSOR_API_KEY,
 			model: { id: model.id },
-			local: { cwd },
+			local: { cwd, settingSources },
 		});
+		// UPSTREAM_REVIEW:C — usage trace: record the configured setting
+		// sources so a trace shows exactly how the SDK agent was set up.
+		traceUsage({ path: "sdk", event: "start", model: model.id, cwd, settingSources });
+
+		// UPSTREAM_REVIEW:C — holds the most recent `turn-ended` usage block.
+		// The SDK fires `onDelta` once per turn as the run streams; keeping the
+		// LAST block means `inputTokens` reflects the final, largest context
+		// size — the closest analogue to the CLI `result` event's single
+		// aggregate usage block, and the value `calculateContextTokens` needs
+		// so the context meter and compaction work on the SDK path.
+		let capturedUsage: CursorUsage | undefined;
+		// UPSTREAM_REVIEW:C — turn counter: distinguishes a genuine one-turn
+		// run from a multi-turn one, and feeds the opt-in usage trace.
+		let turnCount = 0;
 
 		const prompt = buildPromptFromContext(context);
-		run = await agent.send(prompt);
+		run = await agent.send(prompt, {
+			onDelta: ({ update }) => {
+				if (update.type !== "turn-ended") return;
+				turnCount += 1;
+				const turnUsage = "usage" in update ? update.usage : undefined;
+				if (turnUsage) capturedUsage = turnUsage;
+				// UPSTREAM_REVIEW:C — usage trace: one line per turn so a
+				// multi-turn run is visible field-by-field (input vs cache).
+				traceUsage({
+					path: "sdk",
+					event: "turn-ended",
+					index: turnCount,
+					usage: turnUsage ?? null,
+				});
+			},
+		});
 
 		const onAbort = (): void => {
 			if (!run) return;
@@ -168,7 +225,21 @@ export async function pumpViaSdk(
 			// run.wait() and forge a CursorResultEvent so the shared
 			// finalisation path constructs the AssistantMessage.
 			const result = await run.wait();
-			const synthesised = synthesiseResultEvent(result, state.sessionId ?? agent.agentId);
+			// UPSTREAM_REVIEW:C — usage trace: the final captured block plus
+			// the turn count, so a low reading caused by "no turn-ended ever
+			// fired" is distinguishable from a genuine low-context turn.
+			traceUsage({
+				path: "sdk",
+				event: "final",
+				usage: capturedUsage ?? null,
+				turns: turnCount,
+				runStatus: result.status,
+			});
+			const synthesised = synthesiseResultEvent(
+				result,
+				state.sessionId ?? agent.agentId,
+				capturedUsage,
+			);
 			const { events, final } = mapCursorEvent(synthesised, state);
 			for (const e of events) stream.push(e);
 			if (final) {
@@ -206,6 +277,9 @@ export async function pumpViaSdk(
 		} catch {
 			// best effort cleanup
 		}
+		// UPSTREAM_REVIEW:C — balances `enterSdkConsoleScope()`. Placed after
+		// `agent.close()` so any console output from teardown is fenced too.
+		exitSdkConsoleScope();
 	}
 }
 
@@ -385,6 +459,7 @@ function translateStatus(msg: SdkStatusMessage): CursorStreamEvent[] {
 function synthesiseResultEvent(
 	result: { status: string; result?: string; durationMs?: number },
 	sessionId: string,
+	usage?: CursorUsage,
 ): CursorResultEvent {
 	const isError = result.status !== "finished";
 	const subtype: "success" | "error" = isError ? "error" : "success";
@@ -393,7 +468,10 @@ function synthesiseResultEvent(
 		subtype,
 		session_id: sessionId,
 		result: result.result ?? "",
-		usage: {},
+		// UPSTREAM_REVIEW:C — real per-turn usage when the SDK delivered a
+		// `turn-ended` block; `{}` (→ ZERO_USAGE via mapUsage) only when it
+		// never did, which keeps behaviour graceful on older SDK builds.
+		usage: usage ?? {},
 		duration_ms: result.durationMs ?? 0,
 		is_error: isError,
 	};

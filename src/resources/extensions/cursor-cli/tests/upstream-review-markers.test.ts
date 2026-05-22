@@ -75,6 +75,7 @@ const EXPECTED_MIN_TOTAL_B = 30;
 const EXPECTED_FILES_C: ReadonlyArray<string> = [
 	"src/resources/extensions/cursor-cli/sdk-runtime.ts",
 	"src/resources/extensions/cursor-cli/sdk-adapter.ts",
+	"src/resources/extensions/cursor-cli/sdk-console-guard.ts",
 	"src/resources/extensions/cursor-cli/sdk-types.ts",
 	"src/resources/extensions/cursor-cli/path-selector.ts",
 	"src/resources/extensions/cursor-cli/adapter-setting.ts",
@@ -83,6 +84,8 @@ const EXPECTED_FILES_C: ReadonlyArray<string> = [
 	"src/resources/extensions/cursor-cli/stream-adapter.ts",
 	"src/resources/extensions/cursor-cli/index.ts",
 	"src/resources/extensions/cursor-cli/auth-cli-helper.ts",
+	"src/resources/extensions/cursor-cli/doctor.ts",
+	"src/resources/extensions/cursor-cli/usage-trace.ts",
 	"src/resources/extensions/cursor-cli/tests/upstream-review-markers.test.ts",
 	"src/resources/extensions/cursor-cli/tests/integration/stream-end-to-end.test.ts",
 ];

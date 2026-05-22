@@ -101,3 +101,47 @@ describe("renderDoctor", () => {
 		assert.match(out, /p95 latency \(ms\)\s+\|\s+—/);
 	});
 });
+
+// UPSTREAM_REVIEW:C — adapter line tests (plan #06 `/cursor doctor` row).
+describe("renderDoctor adapter line", () => {
+	test("no adapter line when the adapter argument is omitted", () => {
+		const out = renderDoctor(snapshot());
+		assert.equal(out, "no slices recorded yet");
+		assert.doesNotMatch(out, /adapter:/);
+	});
+
+	test("adapter line appears below the no-data sentinel", () => {
+		const out = renderDoctor(snapshot(), "sdk (default)");
+		assert.equal(out, "no slices recorded yet\nadapter: sdk (default)");
+	});
+
+	test("adapter line is the last line below a populated table", () => {
+		record({
+			startedAt: 0,
+			finishedAt: 30,
+			model: "composer-2.5",
+			outcome: "success",
+			inputTokens: 10,
+			outputTokens: 2,
+		});
+		const out = renderDoctor(snapshot(), "cli");
+		const lines = out.split("\n");
+		assert.equal(lines[lines.length - 1], "adapter: cli");
+	});
+
+	test("adapter line follows the last-error summary when both are present", () => {
+		record({
+			startedAt: 0,
+			finishedAt: 250,
+			model: "composer-2.5",
+			outcome: "error",
+			errorCode: "quota_exhausted",
+			inputTokens: 0,
+			outputTokens: 0,
+		});
+		const out = renderDoctor(snapshot(), "cli (fell back from sdk)");
+		const lines = out.split("\n");
+		assert.equal(lines[lines.length - 2], "last error: quota_exhausted @ 250");
+		assert.equal(lines[lines.length - 1], "adapter: cli (fell back from sdk)");
+	});
+});

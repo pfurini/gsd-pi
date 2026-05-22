@@ -19,7 +19,13 @@ import type {
 	Model,
 } from "@gsd/pi-ai";
 import { accumulateSdkAssistantText, pumpViaSdk, translateSdkMessage } from "../sdk-adapter.ts";
-import type { CursorAssistantEvent, SdkMessage, SdkModule } from "../sdk-types.ts";
+import type {
+	CursorAssistantEvent,
+	SdkAgentCreateOptions,
+	SdkMessage,
+	SdkModule,
+	SdkTurnEndedUpdate,
+} from "../sdk-types.ts";
 
 function makeStream(): AssistantMessageEventStream {
 	return new EventStream<AssistantMessageEvent, AssistantMessage>(
@@ -54,13 +60,20 @@ function mockContext(): Context {
 function makeFakeSdk(scenario: {
 	messages: SdkMessage[];
 	wait?: { status: "finished" | "error" | "cancelled"; result?: string };
+	/** Per-turn `turn-ended` usage blocks the fake delivers via `onDelta`. */
+	turnEndedUsage?: NonNullable<SdkTurnEndedUpdate["usage"]>[];
 }): SdkModule {
 	return {
 		Agent: {
 			create: async () => ({
 				agentId: "agent-test",
 				close() {},
-				async send() {
+				async send(_message, options) {
+					// Mirror @cursor/sdk: token usage reaches the adapter only
+					// through the `onDelta` callback's `turn-ended` updates.
+					for (const usage of scenario.turnEndedUsage ?? []) {
+						options?.onDelta?.({ update: { type: "turn-ended", usage } });
+					}
 					return {
 						id: "run-test",
 						agentId: "agent-test",
@@ -154,6 +167,110 @@ describe("pumpViaSdk", () => {
 			text.text,
 			"PONG",
 			"multi-delta assistant text must accumulate, not snapshot-replace",
+		);
+	});
+
+	// UPSTREAM_REVIEW:C — SDK usage parity with the CLI path. @cursor/sdk
+	// surfaces token usage only via `turn-ended` interaction updates on the
+	// onDelta callback; the pump must thread that into the final message so
+	// the context meter and compaction work on the SDK path.
+	test("captures the last turn-ended usage block into the final message", async () => {
+		// Two turns fire; the adapter keeps the last so inputTokens reflects
+		// the final, largest context size (parity with the CLI result event).
+		const sdk = makeFakeSdk({
+			messages: [
+				{
+					type: "assistant",
+					agent_id: "agent-test",
+					run_id: "run-test",
+					message: { role: "assistant", content: [{ type: "text", text: "answer" }] },
+				},
+			],
+			wait: { status: "finished", result: "answer" },
+			turnEndedUsage: [
+				{ inputTokens: 1_000, outputTokens: 10, cacheReadTokens: 0, cacheWriteTokens: 0 },
+				{ inputTokens: 171_000, outputTokens: 240, cacheReadTokens: 50, cacheWriteTokens: 30 },
+			],
+		});
+
+		const stream = makeStream();
+		await pumpViaSdk(sdk, mockModel(), mockContext(), undefined, stream);
+		const final = await stream.result();
+
+		assert.equal(final.usage.input, 171_000, "last turn-ended block must win");
+		assert.equal(final.usage.output, 240);
+		assert.equal(final.usage.cacheRead, 50);
+		assert.equal(final.usage.cacheWrite, 30);
+		assert.equal(final.usage.totalTokens, 171_240);
+	});
+
+	test("usage stays zero when the SDK emits no turn-ended update", async () => {
+		// Graceful fallback: older SDK builds may not deliver a turn-ended
+		// usage block — the path must not crash and reports ZERO_USAGE.
+		const sdk = makeFakeSdk({
+			messages: [
+				{
+					type: "assistant",
+					agent_id: "agent-test",
+					run_id: "run-test",
+					message: { role: "assistant", content: [{ type: "text", text: "hi" }] },
+				},
+			],
+			wait: { status: "finished", result: "hi" },
+		});
+
+		const stream = makeStream();
+		await pumpViaSdk(sdk, mockModel(), mockContext(), undefined, stream);
+		const final = await stream.result();
+
+		assert.equal(final.usage.input, 0);
+		assert.equal(final.usage.totalTokens, 0);
+	});
+
+	// UPSTREAM_REVIEW:C — the adapter requests ONLY the `project` settings
+	// layer: it loads `.cursor/rules` + `AGENTS.md` without triggering the
+	// SDK's cross-tool agent-skill scan that the `user` layer would.
+	test("creates the SDK agent with the project setting source only", async () => {
+		let createOptions: SdkAgentCreateOptions | undefined;
+		const sdk: SdkModule = {
+			Agent: {
+				create: async (options) => {
+					createOptions = options;
+					return {
+						agentId: "agent-test",
+						close() {},
+						async send() {
+							return {
+								id: "run-test",
+								agentId: "agent-test",
+								// eslint-disable-next-line require-yield
+								async *stream() {
+									return;
+								},
+								async wait() {
+									return {
+										id: "run-test",
+										status: "finished" as const,
+										result: "ok",
+										durationMs: 1,
+									};
+								},
+								async cancel() {},
+							};
+						},
+					};
+				},
+			},
+		};
+
+		const stream = makeStream();
+		await pumpViaSdk(sdk, mockModel(), mockContext(), undefined, stream);
+		await stream.result();
+
+		assert.deepEqual(
+			createOptions?.local?.settingSources,
+			["project"],
+			"slice must load only the project Cursor settings layer",
 		);
 	});
 

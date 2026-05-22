@@ -340,6 +340,45 @@ export type SdkMessage =
 	| SdkTaskMessage
 	| SdkUnknownMessage;
 
+// UPSTREAM_REVIEW:C — `@cursor/sdk` exposes per-turn token usage ONLY through
+// the `turn-ended` interaction update delivered to `send`'s `onDelta`
+// callback. `RunResult` (from `run.wait()`) has no usage block, and neither
+// does any `SDKMessage` in the run stream — verified against @cursor/sdk@1.0.13
+// (`run.d.ts` / `messages.d.ts`). This is the SDK path's sole usage surface.
+
+/**
+ * Structural mirror of `@cursor/sdk#TurnEndedUpdate`.
+ *
+ * The `usage` field names match `CursorUsage`'s camelCase shape exactly, so a
+ * captured block flows straight through `mapUsage` with no remapping. `usage`
+ * is optional because the SDK schema marks it so — the adapter falls back to
+ * zero usage when a turn ends without one.
+ */
+export interface SdkTurnEndedUpdate {
+	type: "turn-ended";
+	usage?: {
+		inputTokens: number;
+		outputTokens: number;
+		cacheReadTokens: number;
+		cacheWriteTokens: number;
+	};
+}
+
+/**
+ * Structural mirror of `@cursor/sdk#InteractionUpdate`. Only `turn-ended` is
+ * modelled by name — the adapter ignores every other variant — so the union
+ * is that one shape widened with a `{ type }` catch-all.
+ */
+export type SdkInteractionUpdate = SdkTurnEndedUpdate | { type: string };
+
+/**
+ * Minimal mirror of `@cursor/sdk#SendOptions` — only `onDelta`, the surface
+ * the adapter uses to capture per-turn token usage.
+ */
+export interface SdkSendOptions {
+	onDelta?: (args: { update: SdkInteractionUpdate }) => void;
+}
+
 /** Structural mirror of the `RunResult` shape from `@cursor/sdk#Run.wait()`. */
 export interface SdkRunResult {
 	id: string;
@@ -361,7 +400,9 @@ export interface SdkRun {
 /** Minimal mirror of `@cursor/sdk#SDKAgent`. */
 export interface SdkAgent {
 	readonly agentId: string;
-	send(message: string | { text: string }, options?: unknown): Promise<SdkRun>;
+	// UPSTREAM_REVIEW:C — `options` typed as `SdkSendOptions` so the adapter
+	// can pass `onDelta` and capture `turn-ended` usage (see SdkTurnEndedUpdate).
+	send(message: string | { text: string }, options?: SdkSendOptions): Promise<SdkRun>;
 	close(): void;
 }
 

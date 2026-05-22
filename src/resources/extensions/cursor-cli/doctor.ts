@@ -14,9 +14,17 @@
 import type { MetricsSnapshot } from "./metrics.js";
 
 // UPSTREAM_REVIEW:B
-export function renderDoctor(snapshot: MetricsSnapshot): string {
+export function renderDoctor(snapshot: MetricsSnapshot, adapter?: string): string {
+	// UPSTREAM_REVIEW:C — the resolved adapter ("sdk" / "cli", with a
+	// fallback note when the runtime path differs from the configured
+	// `cursor.adapter` setting) renders as a trailing line, mirroring the
+	// `last error:` summary. Kept outside the table so it surfaces even in
+	// the no-data case and never perturbs the table's fixed column widths.
+	const adapterLine = adapter ? `adapter: ${adapter}` : undefined;
+
 	if (snapshot.sampleCount === 0) {
-		return "no slices recorded yet";
+		const sentinel = "no slices recorded yet";
+		return adapterLine ? `${sentinel}\n${adapterLine}` : sentinel;
 	}
 
 	const rows: Array<[string, string]> = [
@@ -48,6 +56,9 @@ export function renderDoctor(snapshot: MetricsSnapshot): string {
 			`last error: ${snapshot.lastError.code} @ ${snapshot.lastError.at}`,
 		);
 	}
+
+	// UPSTREAM_REVIEW:C — adapter line last, after the optional error line.
+	if (adapterLine) lines.push(adapterLine);
 
 	return lines.join("\n");
 }
