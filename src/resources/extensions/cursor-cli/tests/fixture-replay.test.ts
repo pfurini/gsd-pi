@@ -140,8 +140,6 @@ function scrubEvent(event: AssistantMessageEvent): ScrubbedEvent {
 			};
 		case "server_tool_use":
 			return { type: "server_tool_use", contentIndex: event.contentIndex };
-		case "web_search_result":
-			return { type: "web_search_result", contentIndex: event.contentIndex };
 		case "done":
 		case "error":
 			// Terminal events are surfaced separately via `final`.

@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { pickStreamPath, __resetPathCacheForTests } from "../path-selector.ts";
 import { __setSdkForTests, __clearSdkCacheForTests } from "../sdk-runtime.ts";
 import { writeCursorAdapterSetting } from "../adapter-setting.ts";
+import { ENV_AGENT_DIR } from "@gsd/pi-coding-agent/config.js";
 
 // Test isolation: redirect the agent settings dir to a tmp location via
 // `PI_CODING_AGENT_DIR` (the env override honoured by `getAgentDir`).
@@ -23,9 +24,9 @@ let originalApiKey: string | undefined;
 
 beforeEach(() => {
 	tmpRoot = mkdtempSync(join(tmpdir(), "cursor-path-selector-"));
-	originalAgentDir = process.env.PI_CODING_AGENT_DIR;
+	originalAgentDir = process.env[ENV_AGENT_DIR];
 	originalApiKey = process.env.CURSOR_API_KEY;
-	process.env.PI_CODING_AGENT_DIR = tmpRoot;
+	process.env[ENV_AGENT_DIR] = tmpRoot;
 	// SDK path requires CURSOR_API_KEY (see path-selector.ts for the
 	// rationale — the SDK can't fall back to cursor-agent's credential
 	// store). Set a placeholder so the "should pick SDK" tests do.
@@ -35,8 +36,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-	if (originalAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
-	else process.env.PI_CODING_AGENT_DIR = originalAgentDir;
+	if (originalAgentDir === undefined) delete process.env[ENV_AGENT_DIR];
+	else process.env[ENV_AGENT_DIR] = originalAgentDir;
 	if (originalApiKey === undefined) delete process.env.CURSOR_API_KEY;
 	else process.env.CURSOR_API_KEY = originalApiKey;
 	rmSync(tmpRoot, { recursive: true, force: true });
