@@ -94,7 +94,7 @@ fi
 ok "working tree clean, no in-progress operations"
 
 # Track whether the lockfile changes — surface a hint at the end.
-LOCKFILE_BEFORE_SHA="$(git hash-object package-lock.json 2>/dev/null || echo none)"
+LOCKFILE_BEFORE_SHA="$(git hash-object pnpm-lock.yaml 2>/dev/null || echo none)"
 
 # ─── 2. Fetch ─────────────────────────────────────────────────────────────
 say "Fetch $UPSTREAM and $ORIGIN"
@@ -197,9 +197,9 @@ else
 fi
 
 # ─── 8. Lockfile-changed hint ─────────────────────────────────────────────
-LOCKFILE_AFTER_SHA="$(git hash-object package-lock.json 2>/dev/null || echo none)"
+LOCKFILE_AFTER_SHA="$(git hash-object pnpm-lock.yaml 2>/dev/null || echo none)"
 if [ "$LOCKFILE_BEFORE_SHA" != "$LOCKFILE_AFTER_SHA" ]; then
-  warn "package-lock.json changed during sync — run 'npm ci' before the next build."
+  warn "pnpm-lock.yaml changed during sync — run 'pnpm install' before the next build."
 fi
 
 say "Done"

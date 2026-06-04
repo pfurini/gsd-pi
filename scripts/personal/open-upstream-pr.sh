@@ -14,18 +14,18 @@
 #   5. branch is rebased on upstream/main (offers to rebase if behind)
 #   6. every commit subject matches Conventional Commits
 #   7. secret-scan passes against the PR diff
-#   8. `npm run verify:pr` succeeds (build:core + typecheck:extensions + test:unit)
+#   8. `pnpm run verify:pr` succeeds (build:core + typecheck:extensions + test:unit)
 #   9. `gh` CLI is installed and authenticated
 #  10. push to origin with --force-with-lease (only if previously pushed)
 #  11. prompt for PR title (default = top-commit subject) and body (in $EDITOR)
 #  12. open the PR via gh, print URL, optionally open in browser
 #
 # Usage: scripts/personal/open-upstream-pr.sh [--skip-verify]
-#        --skip-verify   skip `npm run verify:pr` (rare — use only if you JUST ran it)
+#        --skip-verify   skip `pnpm run verify:pr` (rare — use only if you JUST ran it)
 
 set -euo pipefail
 
-UPSTREAM_REPO="${UPSTREAM_REPO:-gsd-build/gsd-2}"
+UPSTREAM_REPO="${UPSTREAM_REPO:-open-gsd/gsd-pi}"
 UPSTREAM="${UPSTREAM_REMOTE:-upstream}"
 ORIGIN="${ORIGIN_REMOTE:-origin}"
 MAIN="${MAIN_BRANCH:-main}"
@@ -170,11 +170,11 @@ fi
 
 # ─── 7. verify:pr ─────────────────────────────────────────────────────────
 if [ "$SKIP_VERIFY" -eq 1 ]; then
-  warn "skipping 'npm run verify:pr' (--skip-verify)"
+  warn "skipping 'pnpm run verify:pr' (--skip-verify)"
 else
-  say "Run npm run verify:pr (build + typecheck + tests)"
+  say "Run pnpm run verify:pr (build + typecheck + tests)"
   warn "this can take a few minutes…"
-  if ! npm run --silent verify:pr >/tmp/verify-pr.$$.log 2>&1; then
+  if ! pnpm run --silent verify:pr >/tmp/verify-pr.$$.log 2>&1; then
     err "verify:pr failed. Tail of log:"
     tail -40 "/tmp/verify-pr.$$.log" >&2
     err "full log at /tmp/verify-pr.$$.log"

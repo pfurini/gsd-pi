@@ -16,7 +16,7 @@ into feat/*" list.
 One-time setup (already done — keep as a reference):
 
 ```bash
-git remote add upstream https://github.com/gsd-build/gsd-2.git   # if missing
+git remote add upstream https://github.com/open-gsd/gsd-pi.git   # if missing
 git branch --set-upstream-to=upstream/main main                  # critical
 ```
 
@@ -42,7 +42,7 @@ What it does, in order, with bail-outs on every guardrail:
    and exits non-zero — your tree is left mid-rebase so you can resume.
 6. Force-with-lease pushes `personal` to `origin`.
 7. Lists any other local feature branches that have fallen behind `main`.
-8. Hints to run `npm ci` if `package-lock.json` changed during the sync.
+8. Hints to run `pnpm install` if `pnpm-lock.yaml` changed during the sync.
 
 Returns you to the branch you started on (only on success).
 
@@ -84,13 +84,13 @@ What it does, in order:
 5. Verifies every commit subject between `upstream/main` and `HEAD` matches
    Conventional Commits.
 6. Runs `node scripts/secret-scan.mjs --diff upstream/main`.
-7. Runs `npm run verify:pr` (build:core + typecheck:extensions + test:unit).
+7. Runs `pnpm run verify:pr` (build:core + typecheck:extensions + test:unit).
    Skip with `--skip-verify` only if you JUST ran it yourself.
 8. Pushes to `origin` (`-u` on first push, `--force-with-lease` afterwards).
 9. Prompts for a PR title (default = top commit subject) and opens `$EDITOR`
    so you can edit the body. Bullet-list of commits + a test-plan checklist
    are pre-filled. Empty body aborts before hitting the GitHub API.
-10. Creates the PR via `gh pr create --repo gsd-build/gsd-2 --base main`.
+10. Creates the PR via `gh pr create --repo open-gsd/gsd-pi --base main`.
     If an open PR already exists for `<your-user>:<branch>`, prints its URL
     instead of double-creating.
 11. Offers to open the PR in your browser.
@@ -105,7 +105,7 @@ Both scripts honour these env vars (rare to need):
 | `ORIGIN_REMOTE` | `origin` | name of your fork's remote |
 | `MAIN_BRANCH` | `main` | upstream's default branch |
 | `PERSONAL_BRANCH` | `personal` | your daily branch (sync only) |
-| `UPSTREAM_REPO` | `gsd-build/gsd-2` | PR target repo (open-pr only) |
+| `UPSTREAM_REPO` | `open-gsd/gsd-pi` | PR target repo (open-pr only) |
 | `EDITOR` | `vi` | editor for PR body (open-pr only) |
 
 ### When NOT to use open-upstream-pr.sh
